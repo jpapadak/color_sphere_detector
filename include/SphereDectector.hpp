@@ -43,22 +43,67 @@ public:
         const size_t& rows = rgb_image.rows;
         const size_t& cols = rgb_image.cols;
         
+        bool visualize = true;
         float saturation_threshold = 60;
         float color_likelihood_threshold = .4;
+        float eccentricity_threshold = .55;
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, saturation_threshold, color_likelihood_threshold);
         
-        this->imagesc(color_classified_image);
-        cv::waitKey(0);
+        if (visualize) {
+            this->imagesc(color_classified_image);
+        }
         
-        std::unordered_map<Color, std::vector<cv::Point2i>, EnumClassHash> color_locations_map;
+        std::unordered_map<Color, std::vector<cv::Point2f>, EnumClassHash> color_locations_map;
         assert(color_classified_image.isContinuous() and color_classified_image.type() == CV_8UC1);
         for (size_t row = 0; row < color_classified_image.rows; ++row) {
             int8_t* p = color_classified_image.ptr<int8_t>(row);
             for (size_t col = 0; col < color_classified_image.cols; ++col) {
-                color_locations_map[static_cast<Color>(p[col])].emplace_back(col, row);
+                
+                Color color = static_cast<Color>(p[col]);
+                if (color != Color::OTHER) {
+                    color_locations_map[color].emplace_back(col, row);
+                }
+                
             }
         }
+        
+        std::vector<std::pair<cv::Vec3f, Color>> detections;
+        for (std::pair<Color, std::vector<cv::Point2f>> entry : color_locations_map) {
+            
+            Color color = entry.first;
+            std::vector<cv::Point2f>& locations = entry.second;
+            cv::Mat locations_mat = cv::Mat(locations.size(), 2, CV_32FC1, locations.data());
+            
+            cv::Mat mean, cov;
+            cv::calcCovarMatrix(locations_mat, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
+            cov = cov/(locations_mat.rows - 1);
+            
+            cv::Mat eigenvalues;
+            cv::eigen(cov, eigenvalues);
+            float eccentricity = std::abs(1 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
+            
+            if (eccentricity < eccentricity_threshold) {
+                float radius = 2*std::sqrt(eigenvalues.at<float>(0));
+                detections.emplace_back(cv::Vec3f(mean.at<float>(0), mean.at<float>(1), radius), color);
+            }
+            
+        }
+        
+        if (visualize) {
+            cv::Mat output = rgb_input.clone();
+            output.convertTo(output, CV_8UC3);
+            for (const std::pair<cv::Vec3f, Color>& detection : detections) {
+                const cv::Vec3f& xyrad = detection.first;
+                Color color = detection.second;
+                cv::Vec3f colorvec = 255*colormap.at(color);
+                cv::circle(output, cv::Point2f(xyrad[0], xyrad[1]), xyrad[2], cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
+            }
+            cv::imshow("Detections", output);
+            cv::waitKey(0);
+        }
+        
+        return detections;
 
     }
     
@@ -143,6 +188,7 @@ private:
         cv::applyColorMap(equalized, false_color, cv::COLORMAP_JET);
 
         cv::imshow("imagesc", false_color);
+        cv::waitKey(0);
     }
     
 };

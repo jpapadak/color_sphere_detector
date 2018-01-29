@@ -12,10 +12,12 @@
  */
 int main(int argc, char** argv) {
     cv::Mat input = cv::imread("spheres.jpg");
-    cv::imshow("Input Image", input);
+    cv::Mat rgb;
+    cv::cvtColor(input, rgb, cv::COLOR_BGR2RGB);
+    cv::imshow("Input Image", rgb);
     cv::waitKey(0);
     SphereDetector detector;
-    detector.detect(input);
+    detector.detect(rgb);
     return 0;
 }
 
