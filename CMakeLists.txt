@@ -1,13 +1,15 @@
-cmake_minimum_required (VERSION 3.1)
-project (colored_sphere_detector)
+cmake_minimum_required(VERSION 3.1)
+project(colored_sphere_detector)
 
-set (CMAKE_VERBOSE_MAKEFILE ON)
-set (CMAKE_CXX_STANDARD 11)
+set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_CXX_STANDARD 11)
 
-include_directories (include)
-
-find_package (OpenCV 3 REQUIRED)
-find_package (OpenMP)
+find_package(catkin REQUIRED COMPONENTS 
+roscpp
+rgbd_drivers_uncc
+)
+find_package(OpenCV 3 REQUIRED)
+find_package(OpenMP)
 
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -15,8 +17,26 @@ if (OPENMP_FOUND)
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
-add_executable (${PROJECT_NAME} 
-    src/main.cpp)
+catkin_package(
+    INCLUDE_DIRS include
+    CATKIN_DEPENDS rgbd_drivers_uncc
+    DEPENDS OpenCV
+)
 
-target_link_libraries (${PROJECT_NAME}
-    ${OpenCV_LIBRARIES})
+include_directories(
+    include
+    ${catkin_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+link_directories(/opt/ros/kinetic/lib) # needed to find OpenNI2Orbbec
+
+add_executable(${PROJECT_NAME} 
+    src/main.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}
+    ${catkin_LIBRARIES} 
+    ${OpenCV_LIBRARIES}
+    ${rgbd_drivers_uncc_LIBRARIES}
+)

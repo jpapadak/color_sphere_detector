@@ -6,6 +6,7 @@
  */
 
 #include <SphereDectector.hpp>
+#include <rgbd_drivers_uncc/rgbd_driver.hpp>
 
 /*
  * 
