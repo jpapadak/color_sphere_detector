@@ -30,7 +30,7 @@ public:
     virtual ~SphereDetector() {
     }
     
-    std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input) {
+    std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input, const cv::Mat& depth_input, const cv::Mat& rgb_distortion_coeffs, const cv::Mat& rgb_camera_matrix) {
         assert(rgb_input.channels() == 3);
         
         cv::Mat rgb_image;
@@ -44,15 +44,16 @@ public:
         const size_t& cols = rgb_image.cols;
         
         bool visualize = true;
-        float saturation_threshold = 60;
-        float color_likelihood_threshold = .4;
-        float eccentricity_threshold = .55;
+        float saturation_threshold = 70;
+        float color_likelihood_threshold = .3;
+        float eccentricity_threshold = .2;
+        float detection_min_pixels = 70;
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, saturation_threshold, color_likelihood_threshold);
         
-        if (visualize) {
-            this->imagesc(color_classified_image);
-        }
+//        if (visualize) {
+//            this->imagesc(color_classified_image);
+//        }
         
         std::unordered_map<Color, std::vector<cv::Point2f>, EnumClassHash> color_locations_map;
         assert(color_classified_image.isContinuous() and color_classified_image.type() == CV_8UC1);
@@ -70,11 +71,14 @@ public:
         
         std::vector<std::pair<cv::Vec3f, Color>> detections;
         for (std::pair<Color, std::vector<cv::Point2f>> entry : color_locations_map) {
-            
             Color color = entry.first;
             std::vector<cv::Point2f>& locations = entry.second;
-            cv::Mat locations_mat = cv::Mat(locations.size(), 2, CV_32FC1, locations.data());
             
+            if (locations.size() < detection_min_pixels) {
+                continue;
+            }
+            
+            cv::Mat locations_mat = cv::Mat(locations.size(), 2, CV_32FC1, locations.data());
             cv::Mat mean, cov;
             cv::calcCovarMatrix(locations_mat, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
             cov = cov/(locations_mat.rows - 1);
@@ -100,7 +104,7 @@ public:
                 cv::circle(output, cv::Point2f(xyrad[0], xyrad[1]), xyrad[2], cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
             }
             cv::imshow("Detections", output);
-            cv::waitKey(0);
+            cv::waitKey(1);
         }
         
         return detections;
