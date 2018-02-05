@@ -31,11 +31,21 @@ include_directories(
 
 link_directories(/opt/ros/kinetic/lib) # needed to find OpenNI2Orbbec
 
-add_executable(${PROJECT_NAME} 
-    src/main.cpp
+add_executable(${PROJECT_NAME}_bagfile 
+    src/bagfile.cpp
 )
 
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(${PROJECT_NAME}_bagfile
+    ${catkin_LIBRARIES} 
+    ${OpenCV_LIBRARIES}
+    ${rgbd_drivers_uncc_LIBRARIES}
+)
+
+add_executable(${PROJECT_NAME}_live 
+    src/live.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}_live
     ${catkin_LIBRARIES} 
     ${OpenCV_LIBRARIES}
     ${rgbd_drivers_uncc_LIBRARIES}

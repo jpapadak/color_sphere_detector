@@ -13,6 +13,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
 
 #ifndef SPHEREDETECTOR_HPP
 #define SPHEREDETECTOR_HPP
@@ -30,7 +31,7 @@ public:
     virtual ~SphereDetector() {
     }
     
-    std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input, const cv::Mat& depth_input, const cv::Mat& rgb_distortion_coeffs, const cv::Mat& rgb_camera_matrix) {
+    std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input) {
         assert(rgb_input.channels() == 3);
         
         cv::Mat rgb_image;
@@ -44,16 +45,18 @@ public:
         const size_t& cols = rgb_image.cols;
         
         bool visualize = true;
-        float saturation_threshold = 70;
-        float color_likelihood_threshold = .3;
-        float eccentricity_threshold = .2;
-        float detection_min_pixels = 70;
+        float colorful_threshold = 0;
+        float color_likelihood_threshold = .1;
+        float eccentricity_threshold = .4;
+        float detection_min_pixels = 50;
         
-        cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, saturation_threshold, color_likelihood_threshold);
+        cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
         
-//        if (visualize) {
-//            this->imagesc(color_classified_image);
-//        }
+        if (visualize) {
+            cv::Mat false_color = this->imagesc(color_classified_image);
+            cv::imshow("Color Classification", false_color);
+            cv::waitKey(1);
+        }
         
         std::unordered_map<Color, std::vector<cv::Point2f>, EnumClassHash> color_locations_map;
         assert(color_classified_image.isContinuous() and color_classified_image.type() == CV_8UC1);
@@ -61,7 +64,7 @@ public:
             int8_t* p = color_classified_image.ptr<int8_t>(row);
             for (size_t col = 0; col < color_classified_image.cols; ++col) {
                 
-                Color color = static_cast<Color>(p[col]);
+                Color color = toColor(p[col]);
                 if (color != Color::OTHER) {
                     color_locations_map[color].emplace_back(col, row);
                 }
@@ -111,7 +114,17 @@ public:
 
     }
     
+    const std::vector<std::pair<cv::Vec3f, Color>>& getDetections() {
+        return this->detections;
+    }
+    
+    void rgbd_callback(const cv::Mat& rgb_input, const cv::Mat& depth_input, const cv::Mat& rgb_distortion_coeffs, const cv::Mat& rgb_camera_matrix) {
+        this->detections = this->detect(rgb_input);
+    }
+    
 private:
+    
+    std::vector<std::pair<cv::Vec3f, Color>> detections;
     
     struct EnumClassHash {
         template <typename T>
@@ -124,38 +137,48 @@ private:
         {Color::RED, cv::Vec3f(1, 0, 0)},
         {Color::GREEN, cv::Vec3f(0, 1, 0)},
         {Color::BLUE, cv::Vec3f(0, 0, 1)},
-        {Color::YELLOW, cv::Vec3f(.5, .5, 0)},
-        {Color::MAGENTA, cv::Vec3f(.5, 0, .5)},
-        {Color::CYAN, cv::Vec3f(0, .5, .5)}
+        {Color::YELLOW, cv::Vec3f(1, 1, 0)},
+        {Color::MAGENTA, cv::Vec3f(1, 0, 1)},
+        {Color::CYAN, cv::Vec3f(0, 1, 1)}
     };
     
     size_t toInteger(Color color) const {
         return static_cast<size_t>(color);
     }
     
-    cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& saturation_threshold, const float& color_likelihood_threshold) const {
+    Color toColor(size_t integer) const {
+        return static_cast<Color>(integer);
+    }
+    
+    cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& colorful_threshold, const float& color_likelihood_threshold) const {
         
         cv::Mat colorful(rgb_image.rows, rgb_image.cols, CV_8UC1);
         cv::Mat color_classes(rgb_image.rows, rgb_image.cols, CV_8UC1);
+        
+        cv::Vec3f intensity_vector(1, 1, 1);
+        cv::Vec3f w = cv::normalize(intensity_vector);
+        cv::Vec3f v1_perp = (1/sqrt(2.0))*cv::Vec3f(-1, 1, 0);
+        cv::Vec3f v2_perp = (1/sqrt(6.0))*cv::Vec3f(1, 1, -2);
+        cv::Matx23f orthogonal_projection(
+                v1_perp(0), v1_perp(1), v1_perp(2), 
+                v2_perp(0), v2_perp(1), v2_perp(2)
+        );
         
         rgb_image.forEach<cv::Vec3f>(
             [&](const cv::Vec3f& pixel, const int* position) -> void {
                 size_t row = position[0];
                 size_t col = position[1];
                 
-                double min, max;
-                cv::minMaxLoc(pixel, &min, &max);
-                float pixel_saturation = max - min;
+                cv::Vec2f pixel2d = orthogonal_projection*(pixel/255.0);
                 
-                if (pixel_saturation > saturation_threshold) {
+                if (cv::norm(pixel2d) > colorful_threshold) {
                     colorful.at<int8_t>(row, col) = true;
-                    cv::Vec3f pixel_normalized = (pixel - cv::Vec3f(min, min, min))/255.0;
                     
                     Color pixel_color;
                     float max_color_likelihood = 0;
                     for (const std::pair<Color, cv::Vec3f>& color : colormap) {
                         
-                        float color_likelihood = pixel_normalized.dot(color.second);
+                        float color_likelihood = pixel2d.dot(orthogonal_projection*color.second);
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
                             pixel_color = color.first;
@@ -163,10 +186,10 @@ private:
                         
                     }
                     
-                    if (max_color_likelihood < color_likelihood_threshold) {
-                        color_classes.at<int8_t>(row, col) = toInteger(Color::OTHER);
-                    } else {
+                    if (max_color_likelihood > color_likelihood_threshold) {
                         color_classes.at<int8_t>(row, col) = toInteger(pixel_color);
+                    } else {
+                        color_classes.at<int8_t>(row, col) = toInteger(Color::OTHER);
                     }
                     
                 } else {
@@ -179,7 +202,15 @@ private:
         return color_classes;
     }
     
-    void imagesc(const cv::Mat& input) const {
+    cv::Vec3f vectorProjection(const cv::Vec3f& a, const cv::Vec3f& b) {
+        return a.dot(b)*cv::normalize(b);
+    }
+    
+    cv::Vec3f vectorRejection(const cv::Vec3f& a, const cv::Vec3f& b) {
+        return a - vectorProjection(a, b);
+    }
+    
+    cv::Mat imagesc(const cv::Mat& input) const {
         double min;
         double max;
         cv::minMaxIdx(input, &min, &max);
@@ -190,9 +221,8 @@ private:
 
         cv::Mat false_color;
         cv::applyColorMap(equalized, false_color, cv::COLORMAP_JET);
-
-        cv::imshow("imagesc", false_color);
-        cv::waitKey(0);
+        
+        return false_color;
     }
     
 };
