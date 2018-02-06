@@ -1,7 +1,7 @@
 clear;
 close all;
 
-rgb = imread('/home/jpapadak/Desktop/spheres.png');
+rgb = imread('../spheres.png');
 [rows, cols, channels] = size(rgb);
 pixels = double(reshape(rgb, [rows*cols, channels]));
 pixels_normalized = pixels/255.0;
