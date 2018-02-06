@@ -20,7 +20,7 @@
 #define SPHEREDETECTOR_HPP
 
 enum class Color {
-    RED, GREEN, BLUE, YELLOW, MAGENTA, CYAN, OTHER
+    RED, GREEN, BLUE, YELLOW, ORANGE, OTHER
 };
 
 class SphereDetector {
@@ -44,20 +44,21 @@ public:
         
         cv::medianBlur(rgb_image, rgb_image, 3);
         
+//        cv::setNumThreads(0);
+        
         const size_t& rows = rgb_image.rows;
         const size_t& cols = rgb_image.cols;
         
         bool visualize = true;
-        float colorful_threshold = .25;
-        float color_likelihood_threshold = .7;
-        float eccentricity_threshold = .35;
+        float colorful_threshold = .14;
+        float color_likelihood_threshold = 0;
+        float eccentricity_threshold = .2; // .35
         float detection_min_pixels = 50;
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
         
         if (visualize) {
-            cv::Mat false_color = this->imagesc(color_classified_image);
-            cv::imshow("Color Classification", false_color);
+            cv::imshow("Color Classification", this->imagesc(color_classified_image));
             cv::waitKey(1);
         }
         
@@ -101,7 +102,7 @@ public:
         }
         
         if (visualize) {
-            cv::Mat output = rgb_input.clone();
+            cv::Mat output = rgb_image.clone();
             output.convertTo(output, CV_8UC3);
             for (const std::pair<cv::Vec3f, Color>& detection : detections) {
                 const cv::Vec3f& xyrad = detection.first;
@@ -137,12 +138,11 @@ private:
     };
     
     const std::unordered_map<Color, cv::Vec3f, EnumClassHash> colormap = {
-        {Color::RED, cv::Vec3f(1, 0, 0)},
-        {Color::GREEN, cv::Vec3f(0, 1, 0)},
-        {Color::BLUE, cv::Vec3f(0, 0, 1)},
-        {Color::YELLOW, cv::Vec3f(1, 1, 0)},
-        {Color::MAGENTA, cv::Vec3f(1, 0, 1)},
-        {Color::CYAN, cv::Vec3f(0, 1, 1)}
+        {Color::RED, cv::Vec3f(.6860, .1381, .1757)},
+        {Color::GREEN, cv::Vec3f(.1722, .4837, .34)},
+        {Color::BLUE, cv::Vec3f(.0567, .3462, .6784)},
+        {Color::YELLOW, cv::Vec3f(.8467, .8047, .2646)},
+        {Color::ORANGE, cv::Vec3f(.7861, .1961, .0871)},
     };
     
     size_t toInteger(Color color) const {
@@ -159,13 +159,20 @@ private:
         cv::Mat color_classes(rgb_image.rows, rgb_image.cols, CV_8UC1);
         
         cv::Vec3f intensity_vector(1, 1, 1);
-        cv::Vec3f w = cv::normalize(intensity_vector);
         cv::Vec3f v1_perp = (1/sqrt(2.0))*cv::Vec3f(-1, 1, 0);
         cv::Vec3f v2_perp = (1/sqrt(6.0))*cv::Vec3f(1, 1, -2);
-        cv::Matx23f orthogonal_projection(
+        cv::Matx23f orthogonal_projection = {
                 v1_perp(0), v1_perp(1), v1_perp(2), 
                 v2_perp(0), v2_perp(1), v2_perp(2)
-        );
+        };
+        constexpr double pi = std::acos(-1.0);
+        
+//        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
+//            cv::Vec2f color_vector = cv::normalize<float, 3>(orthogonal_projection*color.second);
+//            std::cout << "Color: " << toInteger(color.first) << ", " << color_vector.t() << std::endl;
+//            float color_angle = std::atan2<float>(color_vector(1), color_vector(0));
+//            std::cout << "Angle: " << color_angle << std::endl;
+//        }
         
         rgb_image.forEach<cv::Vec3f>(
             [&](const cv::Vec3f& pixel, const int* position) -> void {
@@ -173,18 +180,18 @@ private:
                 size_t col = position[1];
                 
                 cv::Vec2f pixel_vector = orthogonal_projection*(pixel/255.0);
-                float radius = cv::norm(pixel_vector);
-//                float angle = std::atan2<float>(pixel_vector(1), pixel_vector(0));
-
-                if (radius > colorful_threshold) {
-                    colorful.at<int8_t>(row, col) = 255;
+                float pixel_magnitude = cv::norm<float, 2, 1>(pixel_vector);
+//                float pixel_angle = std::atan2<float>(pixel_vector(1), pixel_vector(0));
+//                std::cout << "pixel(" << col << ", " << row << "): " << pixel_vector.t() << ", mag: " << pixel_magnitude << ", angle: " << pixel_angle << std::endl;
+                if (pixel_magnitude > colorful_threshold) {
+                    colorful.at<int8_t>(row, col) = true;
                     
-                    Color pixel_color;
+                    Color pixel_color = Color::OTHER;
                     float max_color_likelihood = 0;
                     for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-                        cv::Vec2f color_vector = orthogonal_projection*color.second;
-//                        float color_angle = std::atan2<float>(color_vector(1), color_vector(0));
-                        float color_likelihood = pixel_vector.dot(color_vector)/(cv::norm(pixel_vector)*cv::norm(color_vector));
+                        cv::Vec2f color_vector = cv::normalize<float, 2>(orthogonal_projection*color.second);
+                        
+                        float color_likelihood = pixel_vector.ddot(color_vector);
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
                             pixel_color = color.first;
@@ -205,7 +212,7 @@ private:
             }
         );
         
-        cv::imshow("Colorful", colorful);
+        cv::imshow("Colorful", this->imagesc(colorful));
         cv::waitKey(1);
         
         return color_classes;
@@ -224,12 +231,12 @@ private:
         double max;
         cv::minMaxIdx(input, &min, &max);
         
-        cv::Mat equalized;
-        float scale = 255.0/(max-min);
-        input.convertTo(equalized, CV_8UC1, scale, min*scale);
+        cv::Mat scaled;
+        float scale = 255.0/(max - min);
+        input.convertTo(scaled, CV_8UC1, scale, -min*scale);
 
         cv::Mat false_color;
-        cv::applyColorMap(equalized, false_color, cv::COLORMAP_JET);
+        cv::applyColorMap(scaled, false_color, cv::COLORMAP_JET);
         
         return false_color;
     }
