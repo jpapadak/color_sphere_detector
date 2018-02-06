@@ -10,6 +10,7 @@
 #include <iostream>
 #include <vector>
 #include <unordered_map>
+#include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
@@ -41,13 +42,15 @@ public:
             rgb_image = rgb_input;
         }
         
+        cv::medianBlur(rgb_image, rgb_image, 3);
+        
         const size_t& rows = rgb_image.rows;
         const size_t& cols = rgb_image.cols;
         
         bool visualize = true;
-        float colorful_threshold = 0;
-        float color_likelihood_threshold = .1;
-        float eccentricity_threshold = .4;
+        float colorful_threshold = .25;
+        float color_likelihood_threshold = .7;
+        float eccentricity_threshold = .35;
         float detection_min_pixels = 50;
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
@@ -169,16 +172,19 @@ private:
                 size_t row = position[0];
                 size_t col = position[1];
                 
-                cv::Vec2f pixel2d = orthogonal_projection*(pixel/255.0);
-                
-                if (cv::norm(pixel2d) > colorful_threshold) {
-                    colorful.at<int8_t>(row, col) = true;
+                cv::Vec2f pixel_vector = orthogonal_projection*(pixel/255.0);
+                float radius = cv::norm(pixel_vector);
+//                float angle = std::atan2<float>(pixel_vector(1), pixel_vector(0));
+
+                if (radius > colorful_threshold) {
+                    colorful.at<int8_t>(row, col) = 255;
                     
                     Color pixel_color;
                     float max_color_likelihood = 0;
                     for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-                        
-                        float color_likelihood = pixel2d.dot(orthogonal_projection*color.second);
+                        cv::Vec2f color_vector = orthogonal_projection*color.second;
+//                        float color_angle = std::atan2<float>(color_vector(1), color_vector(0));
+                        float color_likelihood = pixel_vector.dot(color_vector)/(cv::norm(pixel_vector)*cv::norm(color_vector));
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
                             pixel_color = color.first;
@@ -198,6 +204,9 @@ private:
                 }
             }
         );
+        
+        cv::imshow("Colorful", colorful);
+        cv::waitKey(1);
         
         return color_classes;
     }
