@@ -7,7 +7,7 @@
 
 #include <cmath>
 #include <vector>
-#include <unordered_map>
+#include <map>
 #include <cassert>
 #include <iostream>
 
@@ -36,32 +36,28 @@ public:
     std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input) {
         // Assumes rgb_input is has channels RGB in order
         
-        cv::Mat rgb_image;
-        if (rgb_input.depth() != CV_32F) {
-            rgb_input.convertTo(rgb_image, CV_32F);
-        } else {
-            rgb_image = rgb_input;
-        }
+        const size_t xmargin = 100; // pixels
+        const size_t ymargin = 75; // pixels
+        cv::Mat rgb_image = rgb_input(cv::Rect(xmargin, ymargin, rgb_input.cols - xmargin, rgb_input.rows - ymargin)).clone();
+        cv::medianBlur(rgb_image, rgb_image, 5);
         
-        cv::medianBlur(rgb_image, rgb_image, 3);
+        if (rgb_image.depth() != CV_32F) {
+            rgb_image.convertTo(rgb_image, CV_32F);
+        }
         
         const size_t& rows = rgb_image.rows;
         const size_t& cols = rgb_image.cols;
         
         bool visualize = true;
-        float colorful_threshold = .12; 
-        float color_likelihood_threshold = .98; // -1 to 1
-        float eccentricity_threshold = .4; // 0 to 1
-        float detection_min_pixels = 50;
+        float colorful_threshold = .12; // higher is more restrictive
+        float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
+        float eccentricity_threshold = .37; // 0 to 1, higher is more relaxed
+        float detection_min_pixels = 50; // higher is more restrictive
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
         
-        if (visualize) {
-            cv::imshow("Color Classification", this->imagesc(color_classified_image));
-            cv::waitKey(1);
-        }
-        
-        std::unordered_map<Color, std::vector<cv::Point2f>, EnumClassHash> color_locations_map;
+        // Collect classified pixels
+        std::map<Color, std::vector<cv::Point2f>> color_locations_map;
         assert(color_classified_image.isContinuous() and color_classified_image.type() == CV_8UC1);
         for (size_t row = 0; row < color_classified_image.rows; ++row) {
             int8_t* p = color_classified_image.ptr<int8_t>(row);
@@ -75,35 +71,40 @@ public:
             }
         }
         
+        // Assess data for detections
         std::vector<std::pair<cv::Vec3f, Color>> detections;
         for (std::pair<Color, std::vector<cv::Point2f>> entry : color_locations_map) {
             Color color = entry.first;
             std::vector<cv::Point2f>& locations = entry.second;
             
-            if (locations.size() < detection_min_pixels) {
-                continue;
-            }
+            if (locations.size() > detection_min_pixels) {
             
-            cv::Mat locations_mat = cv::Mat(locations.size(), 2, CV_32FC1, locations.data());
-            cv::Mat mean, cov;
-            cv::calcCovarMatrix(locations_mat, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
-            cov = cov/(locations_mat.rows - 1);
-            
-            cv::Mat eigenvalues;
-            cv::eigen(cov, eigenvalues);
-            float eccentricity = std::abs(1.0 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
-            std::cout << eccentricity << std::endl;
-            
-            if (eccentricity < eccentricity_threshold) {
-                float radius = 2*std::sqrt(eigenvalues.at<float>(0));
-                detections.emplace_back(cv::Vec3f(mean.at<float>(0), mean.at<float>(1), radius), color);
+                cv::Mat locations_mat = cv::Mat(locations.size(), 2, CV_32FC1, locations.data());
+                cv::Mat mean, cov;
+                cv::calcCovarMatrix(locations_mat, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
+                cov = cov/(locations_mat.rows - 1);
+
+                cv::Mat eigenvalues;
+                cv::eigen(cov, eigenvalues);
+                float eccentricity = std::abs(1.0 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
+
+                if (eccentricity < eccentricity_threshold) {
+                    float radius = 2*std::sqrt(eigenvalues.at<float>(0));
+                    detections.emplace_back(cv::Vec3f(mean.at<float>(0) + xmargin, mean.at<float>(1) + ymargin, radius), color);
+                }
+                
             }
             
         }
         
         if (visualize) {
-            cv::Mat output = rgb_image.clone();
-            output.convertTo(output, CV_8UC3);
+            cv::imshow("Color Classification", this->imagesc(color_classified_image));
+            cv::waitKey(1);
+            
+            cv::Mat output = rgb_input.clone();
+            if (output.type() != CV_8UC3) {
+                output.convertTo(output, CV_8UC3);
+            }
             for (const std::pair<cv::Vec3f, Color>& detection : detections) {
                 const cv::Vec3f& xyrad = detection.first;
                 Color color = detection.second;
@@ -133,14 +134,7 @@ private:
     
     std::vector<std::pair<cv::Vec3f, Color>> detections;
     
-    struct EnumClassHash {
-        template <typename T>
-        std::size_t operator()(T t) const {
-            return static_cast<std::size_t>(t);
-        }
-    };
-    
-    const std::unordered_map<Color, cv::Vec3f, EnumClassHash> colormap = {
+    const std::map<Color, cv::Vec3f> colormap = {
         {Color::RED, cv::Vec3f(.6860, .1381, .1757)},
         {Color::GREEN, cv::Vec3f(.1722, .4837, .34)},
         {Color::BLUE, cv::Vec3f(.0567, .3462, .6784)},
@@ -156,8 +150,22 @@ private:
         return static_cast<Color>(integer);
     }
     
-    cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& colorful_threshold, const float& color_likelihood_threshold) const {
+    cv::Matx<float, 5, 3> colorsToMatrix() const {
+        cv::Matx<float, 5, 3> result;
         
+        size_t row = 0;
+        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
+            result(row, 0) = color.second(0);
+            result(row, 1) = color.second(1);
+            result(row, 2) = color.second(2);
+            row++;
+        }
+        
+        return result;
+    }
+    
+    cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& colorful_threshold, const float& color_likelihood_threshold) const {
+                
         cv::Mat colorful(rgb_image.rows, rgb_image.cols, CV_8UC1);
         cv::Mat color_classes(rgb_image.rows, rgb_image.cols, CV_8UC1);
         
