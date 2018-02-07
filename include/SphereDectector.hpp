@@ -5,11 +5,12 @@
  * Created on January 25, 2018, 3:15 PM
  */
 
-#include <cstddef>
-#include <cassert>
-#include <iostream>
+#include <cmath>
 #include <vector>
 #include <unordered_map>
+#include <cassert>
+#include <iostream>
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -33,7 +34,7 @@ public:
     }
     
     std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input) {
-        assert(rgb_input.channels() == 3);
+        // Assumes rgb_input is has channels RGB in order
         
         cv::Mat rgb_image;
         if (rgb_input.depth() != CV_32F) {
@@ -44,15 +45,13 @@ public:
         
         cv::medianBlur(rgb_image, rgb_image, 3);
         
-//        cv::setNumThreads(0);
-        
         const size_t& rows = rgb_image.rows;
         const size_t& cols = rgb_image.cols;
         
         bool visualize = true;
-        float colorful_threshold = .14;
-        float color_likelihood_threshold = 0;
-        float eccentricity_threshold = .2; // .35
+        float colorful_threshold = .12; 
+        float color_likelihood_threshold = .98; // -1 to 1
+        float eccentricity_threshold = .4; // 0 to 1
         float detection_min_pixels = 50;
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
@@ -92,7 +91,8 @@ public:
             
             cv::Mat eigenvalues;
             cv::eigen(cov, eigenvalues);
-            float eccentricity = std::abs(1 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
+            float eccentricity = std::abs(1.0 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
+            std::cout << eccentricity << std::endl;
             
             if (eccentricity < eccentricity_threshold) {
                 float radius = 2*std::sqrt(eigenvalues.at<float>(0));
@@ -110,6 +110,7 @@ public:
                 cv::Vec3f colorvec = 255*colormap.at(color);
                 cv::circle(output, cv::Point2f(xyrad[0], xyrad[1]), xyrad[2], cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
             }
+            cv::cvtColor(output, output, CV_RGB2BGR);
             cv::imshow("Detections", output);
             cv::waitKey(1);
         }
@@ -122,7 +123,9 @@ public:
         return this->detections;
     }
     
-    void rgbd_callback(const cv::Mat& rgb_input, const cv::Mat& depth_input, const cv::Mat& rgb_distortion_coeffs, const cv::Mat& rgb_camera_matrix) {
+    void rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Mat& color_distortion_coeffs, const cv::Mat& color_camera_matrix) {
+        cv::Mat rgb_input;
+        cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
         this->detections = this->detect(rgb_input);
     }
     
@@ -158,21 +161,14 @@ private:
         cv::Mat colorful(rgb_image.rows, rgb_image.cols, CV_8UC1);
         cv::Mat color_classes(rgb_image.rows, rgb_image.cols, CV_8UC1);
         
-        cv::Vec3f intensity_vector(1, 1, 1);
-        cv::Vec3f v1_perp = (1/sqrt(2.0))*cv::Vec3f(-1, 1, 0);
-        cv::Vec3f v2_perp = (1/sqrt(6.0))*cv::Vec3f(1, 1, -2);
+        // Create orthonormal basis in the (1, 1, 1) plane
+        cv::Vec3f v1_perp = (1/std::sqrt(2.0))*cv::Vec3f(-1, 1, 0);
+        cv::Vec3f v2_perp = (1/std::sqrt(6.0))*cv::Vec3f(1, 1, -2);
         cv::Matx23f orthogonal_projection = {
                 v1_perp(0), v1_perp(1), v1_perp(2), 
                 v2_perp(0), v2_perp(1), v2_perp(2)
         };
         constexpr double pi = std::acos(-1.0);
-        
-//        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-//            cv::Vec2f color_vector = cv::normalize<float, 3>(orthogonal_projection*color.second);
-//            std::cout << "Color: " << toInteger(color.first) << ", " << color_vector.t() << std::endl;
-//            float color_angle = std::atan2<float>(color_vector(1), color_vector(0));
-//            std::cout << "Angle: " << color_angle << std::endl;
-//        }
         
         rgb_image.forEach<cv::Vec3f>(
             [&](const cv::Vec3f& pixel, const int* position) -> void {
@@ -181,8 +177,7 @@ private:
                 
                 cv::Vec2f pixel_vector = orthogonal_projection*(pixel/255.0);
                 float pixel_magnitude = cv::norm<float, 2, 1>(pixel_vector);
-//                float pixel_angle = std::atan2<float>(pixel_vector(1), pixel_vector(0));
-//                std::cout << "pixel(" << col << ", " << row << "): " << pixel_vector.t() << ", mag: " << pixel_magnitude << ", angle: " << pixel_angle << std::endl;
+                
                 if (pixel_magnitude > colorful_threshold) {
                     colorful.at<int8_t>(row, col) = true;
                     
@@ -191,7 +186,7 @@ private:
                     for (const std::pair<Color, cv::Vec3f>& color : colormap) {
                         cv::Vec2f color_vector = cv::normalize<float, 2>(orthogonal_projection*color.second);
                         
-                        float color_likelihood = pixel_vector.ddot(color_vector);
+                        float color_likelihood = cv::normalize<float, 2>(pixel_vector).dot(color_vector);
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
                             pixel_color = color.first;

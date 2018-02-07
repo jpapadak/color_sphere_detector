@@ -50,3 +50,11 @@ target_link_libraries(${PROJECT_NAME}_live
     ${OpenCV_LIBRARIES}
     ${rgbd_drivers_uncc_LIBRARIES}
 )
+
+add_executable(${PROJECT_NAME}_testing 
+    src/testing.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}_testing 
+    ${OpenCV_LIBRARIES}
+)
