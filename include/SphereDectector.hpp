@@ -11,17 +11,16 @@
 #include <cassert>
 #include <iostream>
 
-#include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
-#include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/calib3d.hpp>
 
 #ifndef SPHEREDETECTOR_HPP
 #define SPHEREDETECTOR_HPP
 
 enum class Color {
-    RED, GREEN, BLUE, YELLOW, ORANGE, OTHER
+    OTHER, RED, GREEN, BLUE, YELLOW, ORANGE
 };
 
 class SphereDetector {
@@ -55,6 +54,13 @@ public:
         float detection_min_pixels = 50; // higher is more restrictive
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
+        
+//        cv::Mat labels;
+//        cv::Mat stats;
+//        cv::Mat centroids;
+//        cv::connectedComponentsWithStats(color_classified_image, labels, stats, centroids);
+//        cv::imshow("CC", this->imagesc(labels));
+//        cv::waitKey(1);
         
         // Collect classified pixels
         std::map<Color, std::vector<cv::Point2f>> color_locations_map;
@@ -150,19 +156,36 @@ private:
         return static_cast<Color>(integer);
     }
     
-    cv::Matx<float, 5, 3> colorsToMatrix() const {
-        cv::Matx<float, 5, 3> result;
+    cv::Matx<float, 3, 5> colorsToMatrix() const {
+        // Matrix of column vectors
+        cv::Matx<float, 3, 5> result;
         
-        size_t row = 0;
+        size_t col = 0;
         for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-            result(row, 0) = color.second(0);
-            result(row, 1) = color.second(1);
-            result(row, 2) = color.second(2);
-            row++;
+            result(0, col) = color.second(0);
+            result(1, col) = color.second(1);
+            result(2, col) = color.second(2);
+            col++;
         }
         
         return result;
     }
+    
+    template <typename NumericType, int rows, int cols>
+    cv::Matx<NumericType, rows, cols> normalizeColumns(const cv::Matx<NumericType, rows, cols>& input_matrix) const {
+        cv::Matx<NumericType, rows, cols> normalized;
+        
+        for (int col = 0; col < cols; ++col) {
+            // would love a simple Matx -> Vec conversion
+            cv::Matx<NumericType, rows, 1> output_col = (1.0/cv::norm(input_matrix.col(col)))*input_matrix.col(col);
+            for (int row = 0; row < rows; ++row) {
+                normalized(row, col) = output_col(row);
+            }
+        }
+        
+        return normalized;
+    }
+    
     
     cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& colorful_threshold, const float& color_likelihood_threshold) const {
                 
@@ -176,7 +199,8 @@ private:
                 v1_perp(0), v1_perp(1), v1_perp(2), 
                 v2_perp(0), v2_perp(1), v2_perp(2)
         };
-        constexpr double pi = std::acos(-1.0);
+        
+        cv::Matx<float, 2, 5> projected_colors = this->normalizeColumns<float, 2, 5>(orthogonal_projection*this->colorsToMatrix());
         
         rgb_image.forEach<cv::Vec3f>(
             [&](const cv::Vec3f& pixel, const int* position) -> void {
@@ -189,21 +213,13 @@ private:
                 if (pixel_magnitude > colorful_threshold) {
                     colorful.at<int8_t>(row, col) = true;
                     
-                    Color pixel_color = Color::OTHER;
-                    float max_color_likelihood = 0;
-                    for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-                        cv::Vec2f color_vector = cv::normalize<float, 2>(orthogonal_projection*color.second);
-                        
-                        float color_likelihood = cv::normalize<float, 2>(pixel_vector).dot(color_vector);
-                        if (color_likelihood > max_color_likelihood) {
-                            max_color_likelihood = color_likelihood;
-                            pixel_color = color.first;
-                        }
-                        
-                    }
+                    cv::Vec<float, 5> color_likelihoods = projected_colors.t()*cv::normalize<float, 2>(pixel_vector);
+                    int index_max_color;
+                    double max_color_likelihood;
+                    cv::minMaxIdx(color_likelihoods, 0, &max_color_likelihood, 0, &index_max_color);
                     
                     if (max_color_likelihood > color_likelihood_threshold) {
-                        color_classes.at<int8_t>(row, col) = toInteger(pixel_color);
+                        color_classes.at<int8_t>(row, col) = index_max_color + 1;
                     } else {
                         color_classes.at<int8_t>(row, col) = toInteger(Color::OTHER);
                     }
