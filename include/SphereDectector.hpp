@@ -51,16 +51,30 @@ public:
         float colorful_threshold = .12; // higher is more restrictive
         float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
         float eccentricity_threshold = .37; // 0 to 1, higher is more relaxed
-        float detection_min_pixels = 75; // higher is more restrictive
+        float detection_min_pixels = 100; // higher is more restrictive
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
         
-//        cv::Mat labels;
-//        cv::Mat stats;
-//        cv::Mat centroids;
-//        cv::connectedComponentsWithStats(color_classified_image, labels, stats, centroids);
-//        cv::imshow("CC", this->imagesc(labels));
-//        cv::waitKey(1);
+        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
+        
+            cv::Mat color_mask = color_classified_image == toInteger(color.first);
+            cv::Mat labeled_image;
+            cv::Mat stats;
+            cv::Mat centroids;
+            cv::connectedComponentsWithStats(color_mask, labeled_image, stats, centroids);
+            labeled_image.forEach<int>(
+                [&](const int& label, const int* position) -> void {
+                    size_t row = position[0];
+                    size_t col = position[1];
+
+                    if (label != 0 and stats.at<int>(label, cv::CC_STAT_AREA) < detection_min_pixels) {
+                        color_classified_image.at<int8_t>(row, col) = toInteger(Color::OTHER);
+                    }
+
+                }
+            );
+        
+        }
         
         // Collect classified pixels
         std::map<Color, std::vector<cv::Point2f>> color_locations_map;
