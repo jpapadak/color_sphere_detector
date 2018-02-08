@@ -51,7 +51,7 @@ public:
         float colorful_threshold = .12; // higher is more restrictive
         float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
         float eccentricity_threshold = .37; // 0 to 1, higher is more relaxed
-        float detection_min_pixels = 50; // higher is more restrictive
+        float detection_min_pixels = 75; // higher is more restrictive
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
         
@@ -156,6 +156,81 @@ private:
         return static_cast<Color>(integer);
     }
     
+    cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& colorful_threshold, const float& color_likelihood_threshold) const {
+                
+        cv::Mat colorful(rgb_image.rows, rgb_image.cols, CV_8UC1);
+        cv::Mat color_classes(rgb_image.rows, rgb_image.cols, CV_8UC1);
+        
+        // Create orthonormal basis in the (1, 1, 1) plane
+        cv::Vec3f v1_perp = (1/std::sqrt(2.0))*cv::Vec3f(-1, 1, 0);
+        cv::Vec3f v2_perp = (1/std::sqrt(6.0))*cv::Vec3f(1, 1, -2);
+        cv::Matx23f orthogonal_projection = {
+                v1_perp(0), v1_perp(1), v1_perp(2), 
+                v2_perp(0), v2_perp(1), v2_perp(2)
+        };
+        std::map<Color, cv::Vec2f> projected_colormap = this->projectColormap(orthogonal_projection);
+        
+        rgb_image.forEach<cv::Vec3f>(
+            [&](const cv::Vec3f& pixel, const int* position) -> void {
+                size_t row = position[0];
+                size_t col = position[1];
+                
+                cv::Vec2f pixel_vector = orthogonal_projection*(pixel/255.0);
+                float pixel_magnitude = cv::norm<float, 2, 1>(pixel_vector);
+                
+                if (pixel_magnitude > colorful_threshold) {
+                    colorful.at<int8_t>(row, col) = true;
+                    
+                    Color pixel_color = Color::OTHER;
+                    float max_color_likelihood = 0;
+                    for (const std::pair<Color, cv::Vec2f>& color : projected_colormap) {
+                        const cv::Vec2f& color_vector = color.second;
+                        
+                        float color_likelihood = cv::normalize<float, 2>(pixel_vector).dot(color_vector);
+                        if (color_likelihood > max_color_likelihood) {
+                            max_color_likelihood = color_likelihood;
+                            pixel_color = color.first;
+                        }
+                        
+                    }
+                    
+                    if (max_color_likelihood > color_likelihood_threshold) {
+                        color_classes.at<int8_t>(row, col) = toInteger(pixel_color);
+                    } else {
+                        color_classes.at<int8_t>(row, col) = toInteger(Color::OTHER);
+                    }
+                    
+                } else {
+                    colorful.at<int8_t>(row, col) = false;
+                    color_classes.at<int8_t>(row, col) = toInteger(Color::OTHER);
+                }
+            }
+        );
+        
+        cv::imshow("Colorful", this->imagesc(colorful));
+        cv::waitKey(1);
+        
+        return color_classes;
+    }
+    
+    std::map<Color, cv::Vec2f> projectColormap(const cv::Matx23f& projection_matrix) const {
+        std::map<Color, cv::Vec2f> projected_colormap;
+        
+        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
+            projected_colormap[color.first] = cv::normalize<float, 2>(projection_matrix*color.second);
+        }
+        
+        return projected_colormap;
+    }
+    
+    cv::Vec3f vectorProjection(const cv::Vec3f& a, const cv::Vec3f& b) {
+        return a.dot(b)*cv::normalize(b);
+    }
+    
+    cv::Vec3f vectorRejection(const cv::Vec3f& a, const cv::Vec3f& b) {
+        return a - vectorProjection(a, b);
+    }
+    
     cv::Matx<float, 3, 5> colorsToMatrix() const {
         // Matrix of column vectors
         cv::Matx<float, 3, 5> result;
@@ -184,65 +259,6 @@ private:
         }
         
         return normalized;
-    }
-    
-    
-    cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& colorful_threshold, const float& color_likelihood_threshold) const {
-                
-        cv::Mat colorful(rgb_image.rows, rgb_image.cols, CV_8UC1);
-        cv::Mat color_classes(rgb_image.rows, rgb_image.cols, CV_8UC1);
-        
-        // Create orthonormal basis in the (1, 1, 1) plane
-        cv::Vec3f v1_perp = (1/std::sqrt(2.0))*cv::Vec3f(-1, 1, 0);
-        cv::Vec3f v2_perp = (1/std::sqrt(6.0))*cv::Vec3f(1, 1, -2);
-        cv::Matx23f orthogonal_projection = {
-                v1_perp(0), v1_perp(1), v1_perp(2), 
-                v2_perp(0), v2_perp(1), v2_perp(2)
-        };
-        
-        cv::Matx<float, 2, 5> projected_colors = this->normalizeColumns<float, 2, 5>(orthogonal_projection*this->colorsToMatrix());
-        
-        rgb_image.forEach<cv::Vec3f>(
-            [&](const cv::Vec3f& pixel, const int* position) -> void {
-                size_t row = position[0];
-                size_t col = position[1];
-                
-                cv::Vec2f pixel_vector = orthogonal_projection*(pixel/255.0);
-                float pixel_magnitude = cv::norm<float, 2, 1>(pixel_vector);
-                
-                if (pixel_magnitude > colorful_threshold) {
-                    colorful.at<int8_t>(row, col) = true;
-                    
-                    cv::Vec<float, 5> color_likelihoods = projected_colors.t()*cv::normalize<float, 2>(pixel_vector);
-                    int index_max_color;
-                    double max_color_likelihood;
-                    cv::minMaxIdx(color_likelihoods, 0, &max_color_likelihood, 0, &index_max_color);
-                    
-                    if (max_color_likelihood > color_likelihood_threshold) {
-                        color_classes.at<int8_t>(row, col) = index_max_color + 1;
-                    } else {
-                        color_classes.at<int8_t>(row, col) = toInteger(Color::OTHER);
-                    }
-                    
-                } else {
-                    colorful.at<int8_t>(row, col) = false;
-                    color_classes.at<int8_t>(row, col) = toInteger(Color::OTHER);
-                }
-            }
-        );
-        
-        cv::imshow("Colorful", this->imagesc(colorful));
-        cv::waitKey(1);
-        
-        return color_classes;
-    }
-    
-    cv::Vec3f vectorProjection(const cv::Vec3f& a, const cv::Vec3f& b) {
-        return a.dot(b)*cv::normalize(b);
-    }
-    
-    cv::Vec3f vectorRejection(const cv::Vec3f& a, const cv::Vec3f& b) {
-        return a - vectorProjection(a, b);
     }
     
     cv::Mat imagesc(const cv::Mat& input) const {
