@@ -43,10 +43,11 @@ public:
         const float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
         const float detection_min_area = 130; // (pixels) higher is more restrictive
         const float detection_max_area = 1500; // (pixels) higher is more restrictive
-        const float bounding_box_ratio_threshold = .9; // 0 to 1, higher is more restrictive
-        const float eccentricity_threshold = .3; // 0 to 1, higher is more relaxed
+        const float bounding_box_ratio_threshold = .93; // 0 to 1, higher is more restrictive
+        const float circular_area_ratio_threshold = .90; // 0 to 1, higher is more restrictive
         const size_t xmargin = 100; // (pixels)
         const size_t ymargin = 75; // (pixels)
+        constexpr double pi = std::acos(-1.0);
         
         // Trim down input image by margin, median blur, convert to float if needed
         cv::Mat rgb_image = rgb_input(cv::Rect(xmargin, ymargin, rgb_input.cols - xmargin, rgb_input.rows - ymargin)).clone();
@@ -84,33 +85,39 @@ public:
                     float ratio = (width > height) ? static_cast<float>(height)/width : static_cast<float>(width)/height;
                     
                     if (ratio > bounding_box_ratio_threshold) {
-                        // Check pixels within bounding box for circularity
+                        // Bounding box is square enough, compute candidate circle and check data against it
                         
+                        float circle_x = width/2.0f;
+                        float circle_y = height/2.0f;
+                        float radius = (width + height)/4.0f;
+                        float radius_sq = std::pow(radius, 2);
+                        float circle_area = pi*radius_sq;
+                        
+                        // Get nonzero (colorful) pixel locations within bounding box
                         int x = stats.at<int>(label, cv::CC_STAT_LEFT);
                         int y = stats.at<int>(label, cv::CC_STAT_TOP);
                         cv::Rect roi = cv::Rect(x, y, width, height);
-                        if (visualize) {
-                            cv::rectangle(class_and_components, roi, toInteger(color));
-                        }
-                        
-                        // Get nonzero (colorful) pixel locations within bounding box
                         cv::Mat locations;
                         cv::findNonZero(color_mask(roi), locations);
                         locations = locations.reshape(1);
                         locations.convertTo(locations, CV_32F);
                         
-                        cv::Mat mean, cov;
-                        std::tie(mean, cov) = this->computeMeanAndCovariance(locations);
+                        cv::Mat mean, cov, zero_centered_points;
+                        cv::reduce(locations, mean, 0, CV_REDUCE_AVG);
+                        zero_centered_points = locations - cv::Mat1f::ones(locations.rows, 1)*mean;
                         
-                        cv::Mat eigenvalues;
-                        cv::eigen(cov, eigenvalues);
-                        float eccentricity = std::abs(1.0 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
-                        
-                        if (eccentricity < eccentricity_threshold) {
-                            // variance along first two principle components are similar -> data is circular
-                            float radius = 2*std::sqrt(eigenvalues.at<float>(0));
+                        // Check that the number of pixels inside circle is close to area of the circle
+                        cv::Mat point_radii_sq;
+                        cv::reduce(zero_centered_points.mul(zero_centered_points), point_radii_sq, 1, CV_REDUCE_SUM);
+                        float area_points_inside_circle = cv::countNonZero(point_radii_sq <= radius_sq);
+
+                        if (area_points_inside_circle/circle_area > circular_area_ratio_threshold) {
                             cv::Vec3f detection(mean.at<float>(0) + x + xmargin, mean.at<float>(1) + y + ymargin, radius);
                             detections.emplace_back(std::move(detection), color);
+                        }
+                        
+                        if (visualize) {
+                            cv::rectangle(class_and_components, roi, toInteger(color));
                         }
                         
                     }
@@ -206,7 +213,7 @@ private:
                         const cv::Vec2f& color_vector = color.second;
                         
                         float color_likelihood = cv::normalize<float, 2>(pixel_vector).dot(color_vector);
-                        this->vectorProjection(pixel_vector, color_vector);
+                        
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
                             pixel_color = color.first;
@@ -244,11 +251,15 @@ private:
         return projected_colormap;
     }
     
-    std::pair<cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) const {
-        cv::Mat mean, cov;
-        cv::calcCovarMatrix(points, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
-        cov = cov/(points.rows - 1);
-        return std::make_pair(mean, cov);
+    std::tuple<cv::Mat, cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) const {
+        size_t n = points.rows;
+        
+        cv::Mat mean;
+        cv::reduce(points, mean, 0, CV_REDUCE_AVG);
+        cv::Mat zero_centered_points = points - cv::Mat1f::ones(n, 1)*mean;
+        cv::Mat cov = (1.0f/(n - 1))*zero_centered_points*zero_centered_points.t();
+        
+        return std::make_tuple(mean, cov, zero_centered_points);
     }
     
     template <typename NumericType, int size>
