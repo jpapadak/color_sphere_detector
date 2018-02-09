@@ -6,6 +6,7 @@
  */
 
 #include <cmath>
+#include <tuple>
 #include <vector>
 #include <map>
 #include <cassert>
@@ -51,74 +52,66 @@ public:
         float colorful_threshold = .12; // higher is more restrictive
         float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
         float eccentricity_threshold = .37; // 0 to 1, higher is more relaxed
-        float detection_min_pixels = 100; // higher is more restrictive
+        float detection_min_area = 130; // higher is more restrictive
+        float detection_max_area = 1000; // higher is more restrictive
+        float ratio_threshold = .9; // hight is more restrictive
         
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
+        cv::Mat components = color_classified_image.clone();
+        std::vector<std::pair<cv::Vec3f, Color>> detections;
         
-        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-        
-            cv::Mat color_mask = color_classified_image == toInteger(color.first);
+        for (const std::pair<Color, cv::Vec3f>& entry : colormap) {
+            Color color = entry.first;
+            
+            cv::Mat color_mask = color_classified_image == toInteger(color);
             cv::Mat labeled_image;
             cv::Mat stats;
             cv::Mat centroids;
             cv::connectedComponentsWithStats(color_mask, labeled_image, stats, centroids);
-            labeled_image.forEach<int>(
-                [&](const int& label, const int* position) -> void {
-                    size_t row = position[0];
-                    size_t col = position[1];
-
-                    if (label != 0 and stats.at<int>(label, cv::CC_STAT_AREA) < detection_min_pixels) {
-                        color_classified_image.at<int8_t>(row, col) = toInteger(Color::OTHER);
+            
+            for (size_t label = 1; label < stats.rows; ++label) {
+                
+                int area =  stats.at<int>(label, cv::CC_STAT_AREA);
+                if (area > detection_min_area and area < detection_max_area) {
+                    
+                    int width = stats.at<int>(label, cv::CC_STAT_WIDTH);
+                    int height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
+                    float ratio = (width > height) ? static_cast<float>(height)/width : static_cast<float>(width)/height;
+                    
+                    if (ratio > ratio_threshold) {
+                        int x = stats.at<int>(label, cv::CC_STAT_LEFT);
+                        int y = stats.at<int>(label, cv::CC_STAT_TOP);
+                        cv::Rect roi = cv::Rect(x, y, width, height);
+                        cv::rectangle(components, roi, toInteger(color));
+                        
+                        cv::Mat locations;
+                        cv::findNonZero(color_mask(roi), locations);
+                        locations = locations.reshape(1);
+                        locations.convertTo(locations, CV_32F);
+                        
+                        cv::Mat mean, cov;
+                        std::tie(mean, cov) = this->computeMeanAndCovariance(locations);
+                        
+                        cv::Mat eigenvalues;
+                        cv::eigen(cov, eigenvalues);
+                        float eccentricity = std::abs(1.0 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
+                        
+                        if (eccentricity < eccentricity_threshold) {
+                            float radius = 2*std::sqrt(eigenvalues.at<float>(0));
+                            cv::Vec3f detection(mean.at<float>(0) + x + xmargin, mean.at<float>(1) + y + ymargin, radius);
+                            detections.emplace_back(std::move(detection), color);
+                        }
+                        
                     }
-
-                }
-            );
-        
-        }
-        
-        // Collect classified pixels
-        std::map<Color, std::vector<cv::Point2f>> color_locations_map;
-        assert(color_classified_image.isContinuous() and color_classified_image.type() == CV_8UC1);
-        for (size_t row = 0; row < color_classified_image.rows; ++row) {
-            int8_t* p = color_classified_image.ptr<int8_t>(row);
-            for (size_t col = 0; col < color_classified_image.cols; ++col) {
-                
-                Color color = toColor(p[col]);
-                if (color != Color::OTHER) {
-                    color_locations_map[color].emplace_back(col, row);
+                    
                 }
                 
             }
-        }
         
-        // Assess data for detections
-        std::vector<std::pair<cv::Vec3f, Color>> detections;
-        for (std::pair<Color, std::vector<cv::Point2f>> entry : color_locations_map) {
-            Color color = entry.first;
-            std::vector<cv::Point2f>& locations = entry.second;
-            
-            if (locations.size() > detection_min_pixels) {
-            
-                cv::Mat locations_mat = cv::Mat(locations.size(), 2, CV_32FC1, locations.data());
-                cv::Mat mean, cov;
-                cv::calcCovarMatrix(locations_mat, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
-                cov = cov/(locations_mat.rows - 1);
-
-                cv::Mat eigenvalues;
-                cv::eigen(cov, eigenvalues);
-                float eccentricity = std::abs(1.0 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
-
-                if (eccentricity < eccentricity_threshold) {
-                    float radius = 2*std::sqrt(eigenvalues.at<float>(0));
-                    detections.emplace_back(cv::Vec3f(mean.at<float>(0) + xmargin, mean.at<float>(1) + ymargin, radius), color);
-                }
-                
-            }
-            
         }
         
         if (visualize) {
-            cv::imshow("Color Classification", this->imagesc(color_classified_image));
+            cv::imshow("Color Classification & Components", this->imagesc(components));
             cv::waitKey(1);
             
             cv::Mat output = rgb_input.clone();
@@ -236,6 +229,14 @@ private:
         
         return projected_colormap;
     }
+    
+    std::pair<cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) {
+        cv::Mat mean, cov;
+        cv::calcCovarMatrix(points, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
+        cov = cov/(points.rows - 1);
+        return std::make_pair(mean, cov);
+    }
+    
     
     cv::Vec3f vectorProjection(const cv::Vec3f& a, const cv::Vec3f& b) {
         return a.dot(b)*cv::normalize(b);
