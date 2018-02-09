@@ -35,34 +35,38 @@ public:
     
     std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input) {
         // Assumes rgb_input is has channels RGB in order
+        assert(rgb_input.channels() == 3);
         
-        const size_t xmargin = 100; // pixels
-        const size_t ymargin = 75; // pixels
+        // User configurable parameters
+        const bool visualize = true;
+        const float colorful_threshold = .12; // higher is more restrictive
+        const float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
+        const float detection_min_area = 130; // (pixels) higher is more restrictive
+        const float detection_max_area = 1500; // (pixels) higher is more restrictive
+        const float bounding_box_ratio_threshold = .9; // 0 to 1, higher is more restrictive
+        const float eccentricity_threshold = .3; // 0 to 1, higher is more relaxed
+        const size_t xmargin = 100; // (pixels)
+        const size_t ymargin = 75; // (pixels)
+        
+        // Trim down input image by margin, median blur, convert to float if needed
         cv::Mat rgb_image = rgb_input(cv::Rect(xmargin, ymargin, rgb_input.cols - xmargin, rgb_input.rows - ymargin)).clone();
         cv::medianBlur(rgb_image, rgb_image, 5);
-        
         if (rgb_image.depth() != CV_32F) {
             rgb_image.convertTo(rgb_image, CV_32F);
         }
         
-        const size_t& rows = rgb_image.rows;
-        const size_t& cols = rgb_image.cols;
-        
-        bool visualize = true;
-        float colorful_threshold = .12; // higher is more restrictive
-        float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
-        float eccentricity_threshold = .37; // 0 to 1, higher is more relaxed
-        float detection_min_area = 130; // higher is more restrictive
-        float detection_max_area = 1000; // higher is more restrictive
-        float ratio_threshold = .9; // hight is more restrictive
-        
         cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
-        cv::Mat components = color_classified_image.clone();
-        std::vector<std::pair<cv::Vec3f, Color>> detections;
         
+        cv::Mat class_and_components;
+        if (visualize) {
+            class_and_components = color_classified_image.clone();
+        }
+        
+        std::vector<std::pair<cv::Vec3f, Color>> detections;
         for (const std::pair<Color, cv::Vec3f>& entry : colormap) {
-            Color color = entry.first;
+            // For each color class, compute color mask and run connected components on mask
             
+            Color color = entry.first;
             cv::Mat color_mask = color_classified_image == toInteger(color);
             cv::Mat labeled_image;
             cv::Mat stats;
@@ -70,6 +74,7 @@ public:
             cv::connectedComponentsWithStats(color_mask, labeled_image, stats, centroids);
             
             for (size_t label = 1; label < stats.rows; ++label) {
+                // Validate each connected component bounding box
                 
                 int area =  stats.at<int>(label, cv::CC_STAT_AREA);
                 if (area > detection_min_area and area < detection_max_area) {
@@ -78,12 +83,17 @@ public:
                     int height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
                     float ratio = (width > height) ? static_cast<float>(height)/width : static_cast<float>(width)/height;
                     
-                    if (ratio > ratio_threshold) {
+                    if (ratio > bounding_box_ratio_threshold) {
+                        // Check pixels within bounding box for circularity
+                        
                         int x = stats.at<int>(label, cv::CC_STAT_LEFT);
                         int y = stats.at<int>(label, cv::CC_STAT_TOP);
                         cv::Rect roi = cv::Rect(x, y, width, height);
-                        cv::rectangle(components, roi, toInteger(color));
+                        if (visualize) {
+                            cv::rectangle(class_and_components, roi, toInteger(color));
+                        }
                         
+                        // Get nonzero (colorful) pixel locations within bounding box
                         cv::Mat locations;
                         cv::findNonZero(color_mask(roi), locations);
                         locations = locations.reshape(1);
@@ -97,6 +107,7 @@ public:
                         float eccentricity = std::abs(1.0 - eigenvalues.at<float>(1)/eigenvalues.at<float>(0));
                         
                         if (eccentricity < eccentricity_threshold) {
+                            // variance along first two principle components are similar -> data is circular
                             float radius = 2*std::sqrt(eigenvalues.at<float>(0));
                             cv::Vec3f detection(mean.at<float>(0) + x + xmargin, mean.at<float>(1) + y + ymargin, radius);
                             detections.emplace_back(std::move(detection), color);
@@ -111,20 +122,21 @@ public:
         }
         
         if (visualize) {
-            cv::imshow("Color Classification & Components", this->imagesc(components));
-            cv::waitKey(1);
             
             cv::Mat output = rgb_input.clone();
             if (output.type() != CV_8UC3) {
                 output.convertTo(output, CV_8UC3);
             }
+            
             for (const std::pair<cv::Vec3f, Color>& detection : detections) {
                 const cv::Vec3f& xyrad = detection.first;
                 Color color = detection.second;
                 cv::Vec3f colorvec = 255*colormap.at(color);
                 cv::circle(output, cv::Point2f(xyrad[0], xyrad[1]), xyrad[2], cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
             }
+            
             cv::cvtColor(output, output, CV_RGB2BGR);
+            cv::imshow("Color Classification & Components", this->imagesc(class_and_components));
             cv::imshow("Detections", output);
             cv::waitKey(1);
         }
@@ -175,7 +187,7 @@ private:
                 v1_perp(0), v1_perp(1), v1_perp(2), 
                 v2_perp(0), v2_perp(1), v2_perp(2)
         };
-        std::map<Color, cv::Vec2f> projected_colormap = this->projectColormap(orthogonal_projection);
+        std::map<Color, cv::Vec2f> projected_colormap = this->projectColormap(orthogonal_projection, true);
         
         rgb_image.forEach<cv::Vec3f>(
             [&](const cv::Vec3f& pixel, const int* position) -> void {
@@ -194,6 +206,7 @@ private:
                         const cv::Vec2f& color_vector = color.second;
                         
                         float color_likelihood = cv::normalize<float, 2>(pixel_vector).dot(color_vector);
+                        this->vectorProjection(pixel_vector, color_vector);
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
                             pixel_color = color.first;
@@ -214,35 +227,37 @@ private:
             }
         );
         
-        cv::imshow("Colorful", this->imagesc(colorful));
-        cv::waitKey(1);
-        
         return color_classes;
     }
     
-    std::map<Color, cv::Vec2f> projectColormap(const cv::Matx23f& projection_matrix) const {
+    std::map<Color, cv::Vec2f> projectColormap(const cv::Matx23f& projection_matrix, bool normalize) const {
         std::map<Color, cv::Vec2f> projected_colormap;
         
         for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-            projected_colormap[color.first] = cv::normalize<float, 2>(projection_matrix*color.second);
+            if (normalize) {
+                projected_colormap[color.first] = cv::normalize<float, 2>(projection_matrix*color.second);
+            } else {
+                projected_colormap[color.first] = projection_matrix*color.second;
+            }
         }
         
         return projected_colormap;
     }
     
-    std::pair<cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) {
+    std::pair<cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) const {
         cv::Mat mean, cov;
         cv::calcCovarMatrix(points, cov, mean, CV_COVAR_NORMAL | CV_COVAR_ROWS, CV_32F);
         cov = cov/(points.rows - 1);
         return std::make_pair(mean, cov);
     }
     
-    
-    cv::Vec3f vectorProjection(const cv::Vec3f& a, const cv::Vec3f& b) {
+    template <typename NumericType, int size>
+    static cv::Vec<NumericType, size> vectorProjection(const cv::Vec<NumericType, size>& a, const cv::Vec<NumericType, size>& b) {
         return a.dot(b)*cv::normalize(b);
     }
     
-    cv::Vec3f vectorRejection(const cv::Vec3f& a, const cv::Vec3f& b) {
+    template <typename NumericType, int size>
+    static cv::Vec<NumericType, size> vectorRejection(const cv::Vec<NumericType, size>& a, const cv::Vec<NumericType, size>& b) {
         return a - vectorProjection(a, b);
     }
     
