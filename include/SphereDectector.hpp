@@ -24,6 +24,8 @@ enum class Color {
     OTHER, RED, GREEN, BLUE, YELLOW, ORANGE
 };
 
+constexpr double pi = std::acos(-1.0);
+
 class SphereDetector {
 public:
     
@@ -37,17 +39,19 @@ public:
         // Assumes rgb_input is has channels RGB in order
         assert(rgb_input.channels() == 3);
         
-        // User configurable parameters
-        const bool visualize = true;
-        const float colorful_threshold = .12; // higher is more restrictive
-        const float color_likelihood_threshold = .98; // -1 to 1, higher is more restrictive
-        const float detection_min_area = 130; // (pixels) higher is more restrictive
-        const float detection_max_area = 1500; // (pixels) higher is more restrictive
-        const float bounding_box_ratio_threshold = .93; // 0 to 1, higher is more restrictive
-        const float circular_area_ratio_threshold = .90; // 0 to 1, higher is more restrictive
-        const size_t xmargin = 100; // (pixels)
+        // Margin ignored on imput image
+        const size_t xmargin = 100; // (pixels) 
         const size_t ymargin = 75; // (pixels)
-        constexpr double pi = std::acos(-1.0);
+        
+        // Color classification parameters
+        const float colorful_threshold = .10; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
+        const float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
+        
+        // Circle detection parameters
+        const float detection_min_area = 200; // minimum number of pixels within connected component candidate blob
+        const float detection_max_area = 3000; // maximum number of pixels within connected component candidate blob
+        const float bounding_box_ratio_threshold = .93; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
+        const float circular_area_ratio_threshold = .75; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
         
         // Trim down input image by margin, median blur, convert to float if needed
         cv::Mat rgb_image = rgb_input(cv::Rect(xmargin, ymargin, rgb_input.cols - xmargin, rgb_input.rows - ymargin)).clone();
@@ -77,47 +81,47 @@ public:
             for (size_t label = 1; label < stats.rows; ++label) {
                 // Validate each connected component bounding box
                 
-                int area =  stats.at<int>(label, cv::CC_STAT_AREA);
-                if (area > detection_min_area and area < detection_max_area) {
+                int component_area =  stats.at<int>(label, cv::CC_STAT_AREA);
+                if (component_area > detection_min_area and component_area < detection_max_area) {
                     
-                    int width = stats.at<int>(label, cv::CC_STAT_WIDTH);
-                    int height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-                    float ratio = (width > height) ? static_cast<float>(height)/width : static_cast<float>(width)/height;
+                    int bb_width = stats.at<int>(label, cv::CC_STAT_WIDTH);
+                    int bb_height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
+                    float bb_ratio = (bb_width > bb_height) ? static_cast<float>(bb_height)/bb_width : static_cast<float>(bb_width)/bb_height;
                     
-                    if (ratio > bounding_box_ratio_threshold) {
+                    if (bb_ratio > bounding_box_ratio_threshold) {
                         // Bounding box is square enough, compute candidate circle and check data against it
                         
-                        float circle_x = width/2.0f;
-                        float circle_y = height/2.0f;
-                        float radius = (width + height)/4.0f;
-                        float radius_sq = std::pow(radius, 2);
-                        float circle_area = pi*radius_sq;
+                        cv::Vec2f circle_center(bb_width/2.0f, bb_height/2.0f);
+                        float circle_radius = (bb_width + bb_height)/4.0f;
+                        float circle_radius_sq = std::pow(circle_radius, 2);
+                        float circle_area = pi*circle_radius_sq;
                         
                         // Get nonzero (colorful) pixel locations within bounding box
-                        int x = stats.at<int>(label, cv::CC_STAT_LEFT);
-                        int y = stats.at<int>(label, cv::CC_STAT_TOP);
-                        cv::Rect roi = cv::Rect(x, y, width, height);
-                        cv::Mat locations;
-                        cv::findNonZero(color_mask(roi), locations);
-                        locations = locations.reshape(1);
-                        locations.convertTo(locations, CV_32F);
-                        
-                        cv::Mat mean, cov, zero_centered_points;
-                        cv::reduce(locations, mean, 0, CV_REDUCE_AVG);
-                        zero_centered_points = locations - cv::Mat1f::ones(locations.rows, 1)*mean;
+                        int bb_x = stats.at<int>(label, cv::CC_STAT_LEFT);
+                        int bb_y = stats.at<int>(label, cv::CC_STAT_TOP);
+                        cv::Rect bb_roi = cv::Rect(bb_x, bb_y, bb_width, bb_height);
+                        cv::Mat xypoints;
+                        cv::findNonZero(color_mask(bb_roi), xypoints);
+                        xypoints = xypoints.reshape(1);
+                        xypoints.convertTo(xypoints, CV_32F);
                         
                         // Check that the number of pixels inside circle is close to area of the circle
+                        cv::Mat zero_centered_points(xypoints.rows, xypoints.cols, CV_32FC1);
+                        for (size_t r = 0; r < xypoints.rows; ++r) {
+                            zero_centered_points.row(r) = xypoints.row(r) - circle_center;
+                        }
+                        
                         cv::Mat point_radii_sq;
                         cv::reduce(zero_centered_points.mul(zero_centered_points), point_radii_sq, 1, CV_REDUCE_SUM);
-                        float area_points_inside_circle = cv::countNonZero(point_radii_sq <= radius_sq);
+                        float area_points_inside_circle = cv::countNonZero(point_radii_sq <= circle_radius_sq);
 
                         if (area_points_inside_circle/circle_area > circular_area_ratio_threshold) {
-                            cv::Vec3f detection(mean.at<float>(0) + x + xmargin, mean.at<float>(1) + y + ymargin, radius);
+                            cv::Vec3f detection(circle_center(0) + bb_x + xmargin, circle_center(1) + bb_y + ymargin, circle_radius);
                             detections.emplace_back(std::move(detection), color);
                         }
                         
                         if (visualize) {
-                            cv::rectangle(class_and_components, roi, toInteger(color));
+                            cv::rectangle(class_and_components, bb_roi, toInteger(color));
                         }
                         
                     }
@@ -165,6 +169,7 @@ public:
 private:
     
     std::vector<std::pair<cv::Vec3f, Color>> detections;
+    bool visualize = true;
     
     const std::map<Color, cv::Vec3f> colormap = {
         {Color::RED, cv::Vec3f(.6860, .1381, .1757)},
@@ -212,7 +217,7 @@ private:
                     for (const std::pair<Color, cv::Vec2f>& color : projected_colormap) {
                         const cv::Vec2f& color_vector = color.second;
                         
-                        float color_likelihood = cv::normalize<float, 2>(pixel_vector).dot(color_vector);
+                        float color_likelihood = 0.5*(cv::normalize<float, 2>(pixel_vector).dot(color_vector) + 1);
                         
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
