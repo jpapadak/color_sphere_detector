@@ -5,6 +5,9 @@
  * Created on January 25, 2018, 3:15 PM
  */
 
+#ifndef SPHEREDETECTOR_HPP
+#define SPHEREDETECTOR_HPP
+
 #include <cmath>
 #include <tuple>
 #include <vector>
@@ -17,8 +20,6 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
 
-#ifndef SPHEREDETECTOR_HPP
-#define SPHEREDETECTOR_HPP
 
 enum class Color {
     OTHER, RED, GREEN, BLUE, YELLOW, ORANGE
@@ -29,32 +30,51 @@ constexpr double pi = std::acos(-1.0);
 class SphereDetector {
 public:
     
+    struct Configuration {
+        
+        bool visualize = false;
+        
+        // Margin of pixels ignored on input image
+        size_t margin_x = 0; 
+        size_t margin_y = 0;
+        
+        // Color classification parameters
+        float colorful_threshold = .10; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
+        float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
+        
+        // Circle detection parameters
+        float bounding_box_ratio_threshold = .93; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
+        float min_radius_threshold = 10; // minimum radius of candidate circle in pixels
+        float max_radius_threshold = 50; // maximum radius of candidate circle in pixels
+        float circular_area_ratio_threshold = .75; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
+        
+    } config;
+    
     SphereDetector() {    
     }
     
     virtual ~SphereDetector() {
     }
     
+    void setConfiguration(const SphereDetector::Configuration& config) {
+        this->config = config;
+    }
+    
     std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input) {
         // Assumes rgb_input is has channels RGB in order
         assert(rgb_input.channels() == 3);
         
-        // Margin ignored on imput image
-        const size_t xmargin = 100; // (pixels) 
-        const size_t ymargin = 75; // (pixels)
-        
-        // Color classification parameters
-        const float colorful_threshold = .10; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
-        const float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
-        
-        // Circle detection parameters
-        const float bounding_box_ratio_threshold = .93; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
-        const float min_radius_threshold = 10; // minimum radius of candidate circle in pixels
-        const float max_radius_threshold = 50; // maximum radius of candidate circle in pixels
-        const float circular_area_ratio_threshold = .75; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
+        const size_t& margin_x = config.margin_x;
+        const size_t& margin_y = config.margin_y;
+        const float& colorful_threshold = config.colorful_threshold;
+        const float& color_likelihood_threshold = config.color_likelihood_threshold;
+        const float& bounding_box_ratio_threshold = config.bounding_box_ratio_threshold;
+        const float& min_radius_threshold = config.min_radius_threshold;
+        const float& max_radius_threshold = config.max_radius_threshold;
+        const float& circular_area_ratio_threshold = config.circular_area_ratio_threshold;
         
         // Trim down input image by margin, median blur, convert to float if needed
-        cv::Mat rgb_image = rgb_input(cv::Rect(xmargin, ymargin, rgb_input.cols - xmargin, rgb_input.rows - ymargin)).clone();
+        cv::Mat rgb_image = rgb_input(cv::Rect(margin_x, margin_y, rgb_input.cols - margin_x, rgb_input.rows - margin_y)).clone();
         cv::medianBlur(rgb_image, rgb_image, 5);
         if (rgb_image.depth() != CV_32F) {
             rgb_image.convertTo(rgb_image, CV_32F);
@@ -117,7 +137,7 @@ public:
                         float area_points_inside_circle = cv::countNonZero(point_radii_sq <= circle_radius_sq);
 
                         if (area_points_inside_circle/circle_area > circular_area_ratio_threshold) {
-                            cv::Vec3f detection(circle_center(0) + bb_x + xmargin, circle_center(1) + bb_y + ymargin, circle_radius);
+                            cv::Vec3f detection(circle_center(0) + bb_x + margin_x, circle_center(1) + bb_y + margin_y, circle_radius);
                             detections.emplace_back(std::move(detection), color);
                         }
 
@@ -326,4 +346,3 @@ private:
 };
 
 #endif /* SPHEREDETECTOR_HPP */
-
