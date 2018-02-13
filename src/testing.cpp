@@ -10,12 +10,11 @@
 
 int main(int argc, char** argv) {
     
-    cv::Mat input = cv::imread(std::string(std::getenv("HOME")) + "/spheres.png");
+    std::string path = std::string(std::getenv("HOME")) + "/spheres.png";
+    cv::Mat input = cv::imread(path, cv::ImreadModes::IMREAD_COLOR);
     cv::cvtColor(input, input, CV_BGR2RGB);
     SphereDetector detector;
     detector.config.visualize = true;   
-    detector.config.margin_x = 100; 
-    detector.config.margin_y = 75;
     detector.config.colorful_threshold = .10;
     detector.config.color_likelihood_threshold = .98;
     detector.config.bounding_box_ratio_threshold = .93;
