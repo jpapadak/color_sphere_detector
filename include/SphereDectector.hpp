@@ -25,8 +25,6 @@ enum class Color {
     OTHER, RED, GREEN, BLUE, YELLOW, ORANGE
 };
 
-constexpr double pi = std::acos(-1.0);
-
 class SphereDetector {
 public:
     
@@ -51,6 +49,14 @@ public:
         
     } config;
     
+    struct CircleDetection {
+        float x;
+        float y;
+        float radius;
+        Color color;
+        std::vector<cv::Point2i> locations;
+    };
+    
     SphereDetector() {    
     }
     
@@ -61,7 +67,7 @@ public:
         this->config = config;
     }
     
-    std::vector<std::pair<cv::Vec3f, Color>> detect(const cv::Mat& rgb_input) {
+    std::vector<CircleDetection> detectCircles(const cv::Mat& rgb_input) {
         // Assumes rgb_input is has channels RGB in order
         assert(rgb_input.channels() == 3);
         
@@ -74,6 +80,7 @@ public:
         const float max_radius_threshold = config.max_radius_threshold;
         const float circular_fill_ratio_threshold = config.circular_fill_ratio_threshold;
         const float component_area_ratio_threshold = config.component_area_ratio_threshold;
+        constexpr double pi = std::acos(-1.0);
         
         // Trim down input image by margin, median blur, convert to float if needed
         cv::Mat rgb_image = rgb_input(cv::Rect(margin_x, margin_y, rgb_input.cols - margin_x, rgb_input.rows - margin_y)).clone();
@@ -89,7 +96,7 @@ public:
             class_and_components = color_classified_image.clone();
         }
         
-        std::vector<std::pair<cv::Vec3f, Color>> detections;
+        std::vector<CircleDetection> detections;
         for (const std::pair<Color, cv::Vec3f>& entry : colormap) {
             // For each color class, compute color mask and run connected components on mask
             
@@ -123,16 +130,19 @@ public:
                         int bb_x = stats.at<int>(label, cv::CC_STAT_LEFT);
                         int bb_y = stats.at<int>(label, cv::CC_STAT_TOP);
                         cv::Rect bb_roi = cv::Rect(bb_x, bb_y, bb_width, bb_height);
-                        cv::Mat xypoints;
+                        std::vector<cv::Point2i> xypoints;
                         cv::findNonZero(color_mask(bb_roi), xypoints);
-                        xypoints = xypoints.reshape(1);
-                        xypoints.convertTo(xypoints, CV_32F);
+                        cv::Mat xypoints_mat(xypoints, false);
+                        xypoints_mat = xypoints_mat.reshape(1);
+                        cv::Mat xypoints_float;
+                        xypoints_mat.convertTo(xypoints_float, CV_32F);
+                        
 
                         // Check that the number of pixels inside circle is close to area of the circle,
                         // also check that enough of component pixels are inside circle vs out
-                        cv::Mat zero_centered_points(xypoints.rows, xypoints.cols, CV_32FC1);
-                        for (size_t r = 0; r < xypoints.rows; ++r) {
-                            zero_centered_points.row(r) = xypoints.row(r) - circle_center;
+                        cv::Mat zero_centered_points(xypoints_float.rows, xypoints_float.cols, CV_32FC1);
+                        for (size_t r = 0; r < xypoints_float.rows; ++r) {
+                            zero_centered_points.row(r) = xypoints_float.row(r) - circle_center;
                         }
 
                         cv::Mat point_radii_sq;
@@ -141,9 +151,13 @@ public:
                         
                         if (area_points_inside_circle/circle_area > circular_fill_ratio_threshold 
                                 and area_points_inside_circle/component_area > component_area_ratio_threshold) {
-                            
-                            cv::Vec3f detection(circle_center(0) + bb_x + margin_x, circle_center(1) + bb_y + margin_y, circle_radius);
-                            detections.emplace_back(std::move(detection), color);
+                            CircleDetection circle;
+                            circle.color = color;
+                            circle.x = circle_center(0) + bb_x + margin_x;
+                            circle.y = circle_center(1) + bb_y + margin_y;
+                            circle.radius = circle_radius;
+                            circle.locations = std::move(xypoints);
+                            detections.push_back(std::move(circle));
                             
                         }
                         
@@ -170,12 +184,12 @@ public:
                 output.convertTo(output, CV_8UC3);
             }
             
-            for (const std::pair<cv::Vec3f, Color>& detection : detections) {
-                const cv::Vec3f& xyrad = detection.first;
-                Color color = detection.second;
-                cv::Vec3f colorvec = 255*colormap.at(color);
-                cv::circle(output, cv::Point2f(xyrad[0], xyrad[1]), xyrad[2], cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
-                cv::putText(output, "r = " + std::to_string(xyrad[2]), cv::Point2i(xyrad[0] - xyrad[2], xyrad[1] - xyrad[2] - 3), 
+            for (const CircleDetection& detection : detections) {
+                cv::Vec3f colorvec = 255*colormap.at(detection.color);
+                cv::circle(output, cv::Point2f(detection.x, detection.y), detection.radius, 
+                        cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
+                cv::putText(output, "r = " + std::to_string(detection.radius), 
+                        cv::Point2i(detection.x - detection.radius, detection.y - detection.radius - 3), 
                         cv::FONT_HERSHEY_PLAIN, 0.6, cv::Scalar(colorvec[0], colorvec[1], colorvec[2]));
             }
             
@@ -189,19 +203,33 @@ public:
 
     }
     
-    const std::vector<std::pair<cv::Vec3f, Color>>& getDetections() {
-        return this->detections;
+    std::pair<cv::Vec4f, float> fitSphericalModel(const std::vector<cv::Point3f>& points) {
+        
+    }
+    
+    cv::Point3f reproject(const cv::Point2f& pixel, const float& depth, const cv::Point2f& focal_length, const cv::Point2f& center) {
+        
+        
+    }
+    
+    std::vector<cv::Point3f> reproject(const std::vector<cv::Point2f>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
+        
+    }
+    
+    const std::vector<CircleDetection>& getCircleDetections() {
+        return this->circle_detections;
     }
     
     void rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Mat& color_distortion_coeffs, const cv::Mat& color_camera_matrix) {
         cv::Mat rgb_input;
         cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
-        this->detections = this->detect(rgb_input);
+        this->circle_detections = this->detectCircles(rgb_input);
+        
     }
     
 private:
     
-    std::vector<std::pair<cv::Vec3f, Color>> detections;
+    std::vector<CircleDetection> circle_detections;
     bool visualize = true;
     
     const std::map<Color, cv::Vec3f> colormap = {

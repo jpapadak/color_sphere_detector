@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
     cv::cvtColor(input, input, CV_BGR2RGB);
     SphereDetector detector;
     detector.config.visualize = true;   
-    detector.detect(input);
+    detector.detectCircles(input);
     cv::waitKey();
     
     return 0;

@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     bagfile_reader.setTopics(topics);
     
     while(bagfile_reader.readNextRGBDMessage()) {
-        detector.getDetections();
+        detector.getCircleDetections();
     }
     
     return 0;
