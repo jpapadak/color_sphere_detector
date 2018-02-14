@@ -43,10 +43,11 @@ public:
         float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
         
         // Circle detection parameters
-        float bounding_box_ratio_threshold = .93; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
+        float bounding_box_ratio_threshold = .94; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
         float min_radius_threshold = 10; // minimum radius of candidate circle in pixels
         float max_radius_threshold = 50; // maximum radius of candidate circle in pixels
-        float circular_area_ratio_threshold = .75; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
+        float circular_fill_ratio_threshold = .8; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
+        float component_area_ratio_threshold = .95; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
         
     } config;
     
@@ -64,14 +65,15 @@ public:
         // Assumes rgb_input is has channels RGB in order
         assert(rgb_input.channels() == 3);
         
-        const size_t& margin_x = config.margin_x;
-        const size_t& margin_y = config.margin_y;
-        const float& colorful_threshold = config.colorful_threshold;
-        const float& color_likelihood_threshold = config.color_likelihood_threshold;
-        const float& bounding_box_ratio_threshold = config.bounding_box_ratio_threshold;
-        const float& min_radius_threshold = config.min_radius_threshold;
-        const float& max_radius_threshold = config.max_radius_threshold;
-        const float& circular_area_ratio_threshold = config.circular_area_ratio_threshold;
+        const size_t margin_x = config.margin_x;
+        const size_t margin_y = config.margin_y;
+        const float colorful_threshold = config.colorful_threshold;
+        const float color_likelihood_threshold = config.color_likelihood_threshold;
+        const float bounding_box_ratio_threshold = config.bounding_box_ratio_threshold;
+        const float min_radius_threshold = config.min_radius_threshold;
+        const float max_radius_threshold = config.max_radius_threshold;
+        const float circular_fill_ratio_threshold = config.circular_fill_ratio_threshold;
+        const float component_area_ratio_threshold = config.component_area_ratio_threshold;
         
         // Trim down input image by margin, median blur, convert to float if needed
         cv::Mat rgb_image = rgb_input(cv::Rect(margin_x, margin_y, rgb_input.cols - margin_x, rgb_input.rows - margin_y)).clone();
@@ -126,7 +128,8 @@ public:
                         xypoints = xypoints.reshape(1);
                         xypoints.convertTo(xypoints, CV_32F);
 
-                        // Check that the number of pixels inside circle is close to area of the circle
+                        // Check that the number of pixels inside circle is close to area of the circle,
+                        // also check that enough of component pixels are inside circle vs out
                         cv::Mat zero_centered_points(xypoints.rows, xypoints.cols, CV_32FC1);
                         for (size_t r = 0; r < xypoints.rows; ++r) {
                             zero_centered_points.row(r) = xypoints.row(r) - circle_center;
@@ -135,14 +138,21 @@ public:
                         cv::Mat point_radii_sq;
                         cv::reduce(zero_centered_points.mul(zero_centered_points), point_radii_sq, 1, CV_REDUCE_SUM);
                         float area_points_inside_circle = cv::countNonZero(point_radii_sq <= circle_radius_sq);
-
-                        if (area_points_inside_circle/circle_area > circular_area_ratio_threshold) {
+                        
+                        if (area_points_inside_circle/circle_area > circular_fill_ratio_threshold 
+                                and area_points_inside_circle/component_area > component_area_ratio_threshold) {
+                            
                             cv::Vec3f detection(circle_center(0) + bb_x + margin_x, circle_center(1) + bb_y + margin_y, circle_radius);
                             detections.emplace_back(std::move(detection), color);
+                            
                         }
-
+                        
                         if (visualize) {
                             cv::rectangle(class_and_components, bb_roi, toInteger(color));
+                            cv::putText(class_and_components, "Fill: " + std::to_string(area_points_inside_circle/circle_area).substr(0, 4), 
+                                    cv::Point(bb_x, bb_y - 2), cv::FONT_HERSHEY_PLAIN, 0.6, toInteger(color));
+                            cv::putText(class_and_components, "Area: " + std::to_string(area_points_inside_circle/component_area).substr(0, 4), 
+                                    cv::Point(bb_x, bb_y + bb_height + 6), cv::FONT_HERSHEY_PLAIN, 0.6, toInteger(color));
                         }
                         
                     }
@@ -165,6 +175,8 @@ public:
                 Color color = detection.second;
                 cv::Vec3f colorvec = 255*colormap.at(color);
                 cv::circle(output, cv::Point2f(xyrad[0], xyrad[1]), xyrad[2], cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
+                cv::putText(output, "r = " + std::to_string(xyrad[2]), cv::Point2i(xyrad[0] - xyrad[2], xyrad[1] - xyrad[2] - 3), 
+                        cv::FONT_HERSHEY_PLAIN, 0.6, cv::Scalar(colorvec[0], colorvec[1], colorvec[2]));
             }
             
             cv::cvtColor(output, output, CV_RGB2BGR);
