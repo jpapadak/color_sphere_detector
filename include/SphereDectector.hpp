@@ -224,14 +224,17 @@ public:
         
         // created RandomSampleConsensus object and compute the appropriated model
         pcl::SampleConsensusModelSphere<pcl::PointXYZ>::Ptr sphere_model = boost::make_shared<pcl::SampleConsensusModelSphere<pcl::PointXYZ>>(cloud);
+        sphere_model->setRadiusLimits(0.02, 0.08);
         pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(sphere_model);
+        ransac.setMaxIterations(10);
         ransac.setDistanceThreshold(.01);
         ransac.computeModel();
-        Eigen::Vector4f coeffs = ransac.model_coefficients_;
-        
-        std::cout << "Sphere coeffs: " << coeffs.transpose() << "\n";
-//        std::vector<int> inliers;
+        Eigen::VectorXf coeffs;
+        ransac.getModelCoefficients(coeffs);
+        //        std::vector<int> inliers;
 //        ransac.getInliers(inliers);
+        std::cout << "Sphere coeffs: " << coeffs.transpose() << "\n";
+        
     }
     
     
@@ -319,7 +322,11 @@ public:
         
         for (const CircleDetection circle : this->circle_detections) {
             std::vector<cv::Point3f> points = this->reproject(circle.locations, depth_input, focal_length, center);
-            this->fitSphericalModel(points);
+            if (points.size() > 3) {
+                this->fitSphericalModel(points);
+            } else {
+                std::cout << "Not enough points to fit model\n";
+            }
         }
         
     }
