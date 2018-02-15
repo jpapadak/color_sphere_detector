@@ -5,10 +5,13 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_CXX_STANDARD 11)
 
 find_package(catkin REQUIRED COMPONENTS 
-roscpp
-rgbd_drivers_uncc
+    roscpp
+    rgbd_drivers_uncc
 )
+
 find_package(OpenCV 3 REQUIRED)
+find_package(Boost REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common)
 find_package(OpenMP)
 
 if (OPENMP_FOUND)
@@ -20,13 +23,15 @@ endif()
 catkin_package(
     INCLUDE_DIRS include
     CATKIN_DEPENDS rgbd_drivers_uncc
-    DEPENDS OpenCV
+    DEPENDS OpenCV Boost PCL
 )
 
 include_directories(
     include
     ${catkin_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
 )
 
 link_directories(/opt/ros/kinetic/lib) # needed to find OpenNI2Orbbec
@@ -38,6 +43,7 @@ add_executable(${PROJECT_NAME}_bagfile
 target_link_libraries(${PROJECT_NAME}_bagfile
     ${catkin_LIBRARIES} 
     ${OpenCV_LIBRARIES}
+    ${PCL_LIBRARIES}
     ${rgbd_drivers_uncc_LIBRARIES}
 )
 
@@ -48,6 +54,7 @@ add_executable(${PROJECT_NAME}_live
 target_link_libraries(${PROJECT_NAME}_live
     ${catkin_LIBRARIES} 
     ${OpenCV_LIBRARIES}
+    ${PCL_LIBRARIES}
     ${rgbd_drivers_uncc_LIBRARIES}
 )
 
@@ -57,4 +64,5 @@ add_executable(${PROJECT_NAME}_testing
 
 target_link_libraries(${PROJECT_NAME}_testing 
     ${OpenCV_LIBRARIES}
+    ${PCL_LIBRARIES}
 )

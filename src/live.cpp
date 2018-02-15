@@ -8,15 +8,11 @@
 #include <SphereDectector.hpp>
 #include <rgbd_drivers_uncc/rgbd_driver.hpp>
 
-/*
- * 
- */
-
 extern volatile bool run;
 
 int main(int argc, char** argv) {
     SphereDetector detector;
-    detector.config.visualize = true;   
+    detector.config.visualize = true;
     detector.config.margin_x = 100; 
     detector.config.margin_y = 75;
     

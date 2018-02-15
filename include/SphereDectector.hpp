@@ -15,10 +15,16 @@
 #include <cassert>
 #include <iostream>
 
+#include <boost/make_shared.hpp>
+
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
+
+#include <pcl/point_types.h>
+#include <pcl/sample_consensus/ransac.h>
+#include <pcl/sample_consensus/sac_model_sphere.h>
 
 
 enum class Color {
@@ -122,7 +128,7 @@ public:
                     
                     if (circle_radius > min_radius_threshold and circle_radius < max_radius_threshold) {
                     
-                        cv::Vec2f circle_center(bb_width/2.0f, bb_height/2.0f);
+                        cv::Point2f circle_center(bb_width/2.0f, bb_height/2.0f);
                         float circle_radius_sq = std::pow(circle_radius, 2);
                         float circle_area = pi*circle_radius_sq;
 
@@ -132,30 +138,30 @@ public:
                         cv::Rect bb_roi = cv::Rect(bb_x, bb_y, bb_width, bb_height);
                         std::vector<cv::Point2i> xypoints;
                         cv::findNonZero(color_mask(bb_roi), xypoints);
-                        cv::Mat xypoints_mat(xypoints, false);
+                        cv::Mat xypoints_mat(xypoints, false); // note xypoints_mat points to same data as xypoints
                         xypoints_mat = xypoints_mat.reshape(1);
                         cv::Mat xypoints_float;
                         xypoints_mat.convertTo(xypoints_float, CV_32F);
-                        
 
                         // Check that the number of pixels inside circle is close to area of the circle,
                         // also check that enough of component pixels are inside circle vs out
                         cv::Mat zero_centered_points(xypoints_float.rows, xypoints_float.cols, CV_32FC1);
-                        for (size_t r = 0; r < xypoints_float.rows; ++r) {
-                            zero_centered_points.row(r) = xypoints_float.row(r) - circle_center;
-                        }
-
+                        zero_centered_points.col(0) = xypoints_float.col(0) - circle_center.x;
+                        zero_centered_points.col(1) = xypoints_float.col(1) - circle_center.y;
                         cv::Mat point_radii_sq;
                         cv::reduce(zero_centered_points.mul(zero_centered_points), point_radii_sq, 1, CV_REDUCE_SUM);
                         float area_points_inside_circle = cv::countNonZero(point_radii_sq <= circle_radius_sq);
                         
                         if (area_points_inside_circle/circle_area > circular_fill_ratio_threshold 
                                 and area_points_inside_circle/component_area > component_area_ratio_threshold) {
+                            
                             CircleDetection circle;
                             circle.color = color;
-                            circle.x = circle_center(0) + bb_x + margin_x;
-                            circle.y = circle_center(1) + bb_y + margin_y;
+                            circle.x = circle_center.x + bb_x + margin_x;
+                            circle.y = circle_center.y + bb_y + margin_y;
                             circle.radius = circle_radius;
+                            xypoints_mat.col(0) = xypoints_mat.col(0) + bb_x + margin_x;
+                            xypoints_mat.col(1) = xypoints_mat.col(1) + bb_y + margin_y;
                             circle.locations = std::move(xypoints);
                             detections.push_back(std::move(circle));
                             
@@ -204,15 +210,95 @@ public:
     }
     
     std::pair<cv::Vec4f, float> fitSphericalModel(const std::vector<cv::Point3f>& points) {
+         
+        // initialize PointClouds
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = boost::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+        cloud->is_dense = false;
+        cloud->points.resize(points.size());
+        
+        for (size_t i = 0; i < points.size(); ++i) {
+            cloud->points[i].x = points[i].x;
+            cloud->points[i].y = points[i].y;
+            cloud->points[i].z = points[i].z;
+        }
+        
+        // created RandomSampleConsensus object and compute the appropriated model
+        pcl::SampleConsensusModelSphere<pcl::PointXYZ>::Ptr sphere_model = boost::make_shared<pcl::SampleConsensusModelSphere<pcl::PointXYZ>>(cloud);
+        pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(sphere_model);
+        ransac.setDistanceThreshold(.01);
+        ransac.computeModel();
+        Eigen::Vector4f coeffs = ransac.model_coefficients_;
+        
+        std::cout << "Sphere coeffs: " << coeffs.transpose() << "\n";
+//        std::vector<int> inliers;
+//        ransac.getInliers(inliers);
+    }
+    
+    
+    std::vector<cv::Point3f> reproject(const std::vector<cv::Point2i>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
+        
+        const float& fx = focal_length.x;
+        const float& fy = focal_length.y;
+        const float& cx = center.x;
+        const float& cy = center.y;
+        
+        std::vector<cv::Point3f> points;
+        points.reserve(pixel_locations.size());
+        
+        for (const cv::Point2i& pixel : pixel_locations) {
+            
+            const float& z = depth_image.at<float>(pixel.y, pixel.x);
+            if (not std::isnan(z)) {
+                float x = z*(pixel.x - cx)/fx;
+                float y = z*(pixel.y - cy)/fy;
+                points.emplace_back(x, y, z);
+            }
+            
+        }
+        
+        return points;
+        
+    }
+    
+    std::vector<cv::Point3f> reprojectParallelized(const std::vector<cv::Point2i>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
+        // Not yet working
+        
+        cv::Mat locations_mat(pixel_locations, false);
+        
+        const float& fx = focal_length.x;
+        const float& fy = focal_length.y;
+        const float& cx = center.x;
+        const float& cy = center.y;
+        
+        std::vector<cv::Point3f> points;
+        points.reserve(pixel_locations.size());
+        
+        locations_mat.forEach<cv::Point2i>(
+            [&fx, &fy, &cx, &cy, &depth_image, &points](const cv::Point2i& pixel, const int* position) -> void {
+                size_t index = position[0];
+            
+                const float& z = depth_image.at<float>(pixel.y, pixel.x);
+                float x = z*(pixel.x - cx)/fx;
+                float y = z*(pixel.y - cy)/fy;
+                points.emplace(points.begin() + index, x, y, z);
+            
+            }
+        );
+        
+        return points;
         
     }
     
     cv::Point3f reproject(const cv::Point2f& pixel, const float& depth, const cv::Point2f& focal_length, const cv::Point2f& center) {
         
+        const float& fx = focal_length.x;
+        const float& fy = focal_length.y;
+        const float& cx = center.x;
+        const float& cy = center.y;
         
-    }
-    
-    std::vector<cv::Point3f> reproject(const std::vector<cv::Point2f>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
+        float x = depth*(pixel.x - cx)/fx;
+        float y = depth*(pixel.y - cy)/fy;
+        return cv::Point3f(x, y, depth);
         
     }
     
@@ -224,6 +310,17 @@ public:
         cv::Mat rgb_input;
         cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
         this->circle_detections = this->detectCircles(rgb_input);
+        
+        cv::Point2f focal_length(color_camera_matrix.at<float>(0, 0), color_camera_matrix.at<float>(1, 1));
+        cv::Point2f center(color_camera_matrix.at<float>(0, 2), color_camera_matrix.at<float>(1, 2));
+        
+        if (this->circle_detections.size() > 0)
+            std::cout << this->circle_detections.size() << " circles detected\n";
+        
+        for (const CircleDetection circle : this->circle_detections) {
+            std::vector<cv::Point3f> points = this->reproject(circle.locations, depth_input, focal_length, center);
+            this->fitSphericalModel(points);
+        }
         
     }
     
