@@ -209,21 +209,10 @@ public:
 
     }
     
-    std::pair<cv::Vec4f, float> fitSphericalModel(const std::vector<cv::Point3f>& points) {
-         
-        // initialize PointClouds
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = boost::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        cloud->is_dense = false;
-        cloud->points.resize(points.size());
-        
-        for (size_t i = 0; i < points.size(); ++i) {
-            cloud->points[i].x = points[i].x;
-            cloud->points[i].y = points[i].y;
-            cloud->points[i].z = points[i].z;
-        }
+    std::pair<cv::Vec4f, float> fitSphericalModel(pcl::PointCloud<pcl::PointXYZ>::Ptr points) {
         
         // created RandomSampleConsensus object and compute the appropriated model
-        pcl::SampleConsensusModelSphere<pcl::PointXYZ>::Ptr sphere_model = boost::make_shared<pcl::SampleConsensusModelSphere<pcl::PointXYZ>>(cloud);
+        pcl::SampleConsensusModelSphere<pcl::PointXYZ>::Ptr sphere_model = boost::make_shared<pcl::SampleConsensusModelSphere<pcl::PointXYZ>>(points);
         sphere_model->setRadiusLimits(0.02, 0.08);
         pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(sphere_model);
         ransac.setMaxIterations(10);
@@ -292,6 +281,33 @@ public:
         
     }
     
+    pcl::PointCloud<pcl::PointXYZ>::Ptr reprojectToCloud(const std::vector<cv::Point2i>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
+        
+        
+        const float& fx = focal_length.x;
+        const float& fy = focal_length.y;
+        const float& cx = center.x;
+        const float& cy = center.y;
+        
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = boost::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+        cloud->is_dense = false;
+        cloud->reserve(pixel_locations.size());
+        
+        for (const cv::Point2i& pixel : pixel_locations) {
+            
+            const float& z = depth_image.at<float>(pixel.y, pixel.x);
+            if (not std::isnan(z)) {
+                float x = z*(pixel.x - cx)/fx;
+                float y = z*(pixel.y - cy)/fy;
+                cloud->push_back(pcl::PointXYZ(x, y, z));
+            }
+            
+        }
+        
+        return cloud;
+        
+    }
+    
     cv::Point3f reproject(const cv::Point2f& pixel, const float& depth, const cv::Point2f& focal_length, const cv::Point2f& center) {
         
         const float& fx = focal_length.x;
@@ -321,8 +337,8 @@ public:
             std::cout << this->circle_detections.size() << " circles detected\n";
         
         for (const CircleDetection circle : this->circle_detections) {
-            std::vector<cv::Point3f> points = this->reproject(circle.locations, depth_input, focal_length, center);
-            if (points.size() > 3) {
+            pcl::PointCloud<pcl::PointXYZ>::Ptr points = this->reprojectToCloud(circle.locations, depth_input, focal_length, center);
+            if (points->size() > 3) {
                 this->fitSphericalModel(points);
             } else {
                 std::cout << "Not enough points to fit model\n";
