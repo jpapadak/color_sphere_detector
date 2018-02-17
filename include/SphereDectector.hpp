@@ -370,7 +370,7 @@ public:
             if (not std::isnan(z)) {
                 float x = z*(pixel.x - image_center.x)/focal_length.x;
                 float y = z*(pixel.y - image_center.y)/focal_length.y;
-                cloud->push_back(std::move(pcl::PointXYZ(x, y, z)));
+                cloud->points.emplace_back(x, y, z);
             }
             
         }
@@ -386,7 +386,7 @@ public:
         
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = boost::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
         cloud->is_dense = false;
-        cloud->resize(pixel_locations.size());
+        cloud->reserve(pixel_locations.size());
         cv::Mat locations_mat(pixel_locations, false); // convert from vector without copy
         
         locations_mat.forEach<cv::Point2i>(
@@ -396,8 +396,9 @@ public:
                 const float& z = depth_image.at<float>(pixel.y, pixel.x);
                 float x = z*(pixel.x - image_center.x)/focal_length.x;
                 float y = z*(pixel.y - image_center.y)/focal_length.y;
-                cloud[index] = pcl::PointXYZ(x, y, z);
-            
+                cloud->points.emplace(cloud->begin() + index, x, y, z);
+//                cloud[index] = pcl::PointXYZ(x, y, z);
+                
             }
             
         );
