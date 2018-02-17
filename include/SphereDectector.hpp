@@ -95,7 +95,9 @@ public:
     virtual ~SphereDetector() {
     }
     
-    void rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Mat& distortion_coeffs, const cv::Mat& camera_matrix) {
+    void rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, 
+            const cv::Mat& distortion_coeffs, const cv::Mat& camera_matrix) {
+        
         cv::Mat rgb_input;
         cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
         cv::Point2f focal_length(camera_matrix.at<float>(0, 0), camera_matrix.at<float>(1, 1));
@@ -355,30 +357,6 @@ public:
         
     }
     
-    static std::vector<cv::Point3f> reprojectParallelized(const std::vector<cv::Point2i>& pixel_locations, 
-            const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& image_center) {
-        // Not yet working
-        
-        std::vector<cv::Point3f> points;
-        points.reserve(pixel_locations.size());
-        cv::Mat locations_mat(pixel_locations, false); // convert from vector without copy
-        
-        locations_mat.forEach<cv::Point2i>(
-            [&focal_length, &image_center, &depth_image, &points](const cv::Point2i& pixel, const int* position) -> void {
-                size_t index = position[0];
-            
-                const float& z = depth_image.at<float>(pixel.y, pixel.x);
-                float x = z*(pixel.x - image_center.x)/focal_length.x;
-                float y = z*(pixel.y - image_center.y)/focal_length.y;
-                points.emplace(points.begin() + index, x, y, z);
-            
-            }
-            
-        );
-        
-        return points;
-    }
-    
     static pcl::PointCloud<pcl::PointXYZ>::Ptr reprojectToCloud(const std::vector<cv::Point2i>& pixel_locations, 
             const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& image_center) {
         
@@ -392,13 +370,39 @@ public:
             if (not std::isnan(z)) {
                 float x = z*(pixel.x - image_center.x)/focal_length.x;
                 float y = z*(pixel.y - image_center.y)/focal_length.y;
-                cloud->push_back(pcl::PointXYZ(x, y, z));
+                cloud->push_back(std::move(pcl::PointXYZ(x, y, z)));
             }
             
         }
         
         return cloud;
         
+    }
+    
+    static pcl::PointCloud<pcl::PointXYZ>::Ptr reprojectToCloudParallelized(
+            const std::vector<cv::Point2i>& pixel_locations, const cv::Mat& depth_image, 
+            const cv::Point2f& focal_length, const cv::Point2f& image_center) {
+        // Not yet working
+        
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = boost::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+        cloud->is_dense = false;
+        cloud->resize(pixel_locations.size());
+        cv::Mat locations_mat(pixel_locations, false); // convert from vector without copy
+        
+        locations_mat.forEach<cv::Point2i>(
+            [&focal_length, &image_center, &depth_image, &cloud](const cv::Point2i& pixel, const int* position) -> void {
+                size_t index = position[0];
+            
+                const float& z = depth_image.at<float>(pixel.y, pixel.x);
+                float x = z*(pixel.x - image_center.x)/focal_length.x;
+                float y = z*(pixel.y - image_center.y)/focal_length.y;
+                cloud[index] = pcl::PointXYZ(x, y, z);
+            
+            }
+            
+        );
+        
+        return cloud;
     }
     
     const std::vector<CircleDetection>& getCircleDetections() {
