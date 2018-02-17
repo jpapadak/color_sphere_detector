@@ -44,6 +44,13 @@ public:
         
         // Color classification parameters
         
+        std::map<Color, cv::Vec3f> colormap = {
+            {Color::RED, cv::Vec3f(.6860, .1381, .1757)},
+            {Color::GREEN, cv::Vec3f(.1722, .4837, .34)},
+            {Color::BLUE, cv::Vec3f(.0567, .3462, .6784)},
+            {Color::YELLOW, cv::Vec3f(.8467, .8047, .2646)},
+            {Color::ORANGE, cv::Vec3f(.7861, .1961, .0871)},
+        };
         float colorful_threshold = .10; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
         float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
         
@@ -88,33 +95,84 @@ public:
     virtual ~SphereDetector() {
     }
     
-    void setConfiguration(const SphereDetector::Configuration& config) {
-        this->config = config;
+    void rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Mat& distortion_coeffs, const cv::Mat& camera_matrix) {
+        cv::Mat rgb_input;
+        cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
+        cv::Point2f focal_length(camera_matrix.at<float>(0, 0), camera_matrix.at<float>(1, 1));
+        cv::Point2f image_center(camera_matrix.at<float>(0, 2), camera_matrix.at<float>(1, 2));
+        
+        this->detect(rgb_input, depth_input, focal_length, image_center);
+        
+    }
+    
+    std::vector<SphereDetection> detect(const cv::Mat& rgb_input, const cv::Mat& depth_input, 
+            const cv::Point2f& focal_length, const cv::Point2f& image_center) {
+        
+        const size_t min_points_for_fitting = config.min_points_for_fitting;
+        const float inlier_percentage_threshold = config.inlier_percentage_threshold;
+        
+        std::vector<CircleDetection> circles = this->detectCircles(rgb_input);
+        
+        std::vector<SphereDetection> spheres;
+        spheres.reserve(circles.size());
+        
+        for (const CircleDetection circle : circles) {
+            pcl::PointCloud<pcl::PointXYZ>::Ptr points = 
+                    this->reprojectToCloud(circle.locations, depth_input, focal_length, image_center);
+            
+            if (points->size() > min_points_for_fitting) {
+                
+                SphereDetection sphere = this->fitSphericalModel(points);
+                sphere.color = circle.color;
+                
+                if (sphere.confidence > inlier_percentage_threshold) {
+                    spheres.push_back(std::move(sphere));
+                }
+                
+            }
+            
+        }
+        
+        circle_detections = circles;
+        sphere_detections = spheres;
+        
+        return spheres;
+        
     }
     
     std::vector<CircleDetection> detectCircles(const cv::Mat& rgb_input) {
+        return std::move(this->detectCircles(rgb_input, 
+                    config.colormap, config.margin_x, config.margin_y, 
+                    config.colorful_threshold, config.color_likelihood_threshold, 
+                    config.bounding_box_ratio_threshold, 
+                    config.min_circle_radius, config.max_circle_radius, 
+                    config.circular_fill_ratio_threshold, 
+                    config.component_area_ratio_threshold, config.visualize)
+                );
+    }
+    
+    static std::vector<CircleDetection> detectCircles(const cv::Mat& rgb_input, 
+            const std::map<Color, cv::Vec3f>& colormap,
+            size_t margin_x, size_t margin_y, 
+            float colorful_threshold, float color_likelihood_threshold, 
+            float bounding_box_ratio_threshold, float min_radius, float max_radius, 
+            float circular_fill_ratio_threshold, float component_area_ratio_threshold, bool visualize) {
+        
         // Assumes rgb_input is has channels RGB in order
         assert(rgb_input.channels() == 3);
         
-        const size_t margin_x = config.margin_x;
-        const size_t margin_y = config.margin_y;
-        const float colorful_threshold = config.colorful_threshold;
-        const float color_likelihood_threshold = config.color_likelihood_threshold;
-        const float bounding_box_ratio_threshold = config.bounding_box_ratio_threshold;
-        const float min_radius = config.min_circle_radius;
-        const float max_radius = config.max_circle_radius;
-        const float circular_fill_ratio_threshold = config.circular_fill_ratio_threshold;
-        const float component_area_ratio_threshold = config.component_area_ratio_threshold;
         constexpr double pi = std::acos(-1.0);
         
         // Trim down input image by margin, median blur, convert to float if needed
-        cv::Mat rgb_image = rgb_input(cv::Rect(margin_x, margin_y, rgb_input.cols - margin_x, rgb_input.rows - margin_y)).clone();
+        cv::Rect roi(margin_x, margin_y, rgb_input.cols - margin_x, rgb_input.rows - margin_y);
+        cv::Mat rgb_image = rgb_input(roi).clone();
         cv::medianBlur(rgb_image, rgb_image, 5);
         if (rgb_image.depth() != CV_32F) {
             rgb_image.convertTo(rgb_image, CV_32F);
         }
         
-        cv::Mat color_classified_image = this->classifyPixelColors(rgb_image, colorful_threshold, color_likelihood_threshold);
+        cv::Mat color_classified_image = 
+                SphereDetector::classifyPixelColors(rgb_image, colormap, colorful_threshold, color_likelihood_threshold);
         
         cv::Mat class_and_components;
         if (visualize) {
@@ -138,7 +196,8 @@ public:
                 int component_area =  stats.at<int>(label, cv::CC_STAT_AREA);
                 int bb_width = stats.at<int>(label, cv::CC_STAT_WIDTH);
                 int bb_height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-                float bb_ratio = (bb_width > bb_height) ? static_cast<float>(bb_height)/bb_width : static_cast<float>(bb_width)/bb_height;
+                float bb_ratio = (bb_width > bb_height) ? 
+                    static_cast<float>(bb_height)/bb_width : static_cast<float>(bb_width)/bb_height;
 
                 if (bb_ratio > bounding_box_ratio_threshold) {
                     // Bounding box is square enough, compute candidate circle and check data against it
@@ -157,7 +216,7 @@ public:
                         cv::Rect bb_roi = cv::Rect(bb_x, bb_y, bb_width, bb_height);
                         std::vector<cv::Point2i> xypoints;
                         cv::findNonZero(color_mask(bb_roi), xypoints);
-                        cv::Mat xypoints_mat(xypoints, false); // note xypoints_mat points to same data as xypoints
+                        cv::Mat xypoints_mat(xypoints, false); // note: points to same data as xypoints
                         xypoints_mat = xypoints_mat.reshape(1);
                         cv::Mat xypoints_float;
                         xypoints_mat.convertTo(xypoints_float, CV_32F);
@@ -190,10 +249,14 @@ public:
                         
                         if (visualize) {
                             cv::rectangle(class_and_components, bb_roi, toInteger(color));
-                            cv::putText(class_and_components, "Fill: " + std::to_string(circular_fill_ratio).substr(0, 4), 
-                                    cv::Point(bb_x, bb_y - 2), cv::FONT_HERSHEY_PLAIN, 0.6, toInteger(color));
-                            cv::putText(class_and_components, "Area: " + std::to_string(component_area_ratio).substr(0, 4), 
-                                    cv::Point(bb_x, bb_y + bb_height + 6), cv::FONT_HERSHEY_PLAIN, 0.6, toInteger(color));
+                            cv::putText(class_and_components, 
+                                    "Fill: " + std::to_string(circular_fill_ratio).substr(0, 4), 
+                                    cv::Point(bb_x, bb_y - 2), cv::FONT_HERSHEY_PLAIN, 
+                                    0.6, toInteger(color));
+                            cv::putText(class_and_components, 
+                                    "Area: " + std::to_string(component_area_ratio).substr(0, 4), 
+                                    cv::Point(bb_x, bb_y + bb_height + 6), cv::FONT_HERSHEY_PLAIN, 
+                                    0.6, toInteger(color));
                         }
                         
                     }
@@ -221,7 +284,7 @@ public:
             }
             
             cv::cvtColor(output, output, CV_RGB2BGR);
-            cv::imshow("Color Classification & Components", this->imagesc(class_and_components));
+            cv::imshow("Color Classification & Components", SphereDetector::imagesc(class_and_components));
             cv::imshow("Detections", output);
             cv::waitKey(1);
         }
@@ -231,14 +294,20 @@ public:
     }
     
     SphereDetection fitSphericalModel(pcl::PointCloud<pcl::PointXYZ>::Ptr points) {
+        return SphereDetector::fitSphericalModel(points, config.min_sphere_radius, 
+                config.max_sphere_radius, config.ransac_model_distance_threshold);
+    }
+    
+    static SphereDetection fitSphericalModel(pcl::PointCloud<pcl::PointXYZ>::Ptr points, 
+            float min_radius, float max_radius, float ransac_model_distance_threshold) {
         
         pcl::SampleConsensusModelSphere<pcl::PointXYZ>::Ptr sphere_model = 
                 boost::make_shared<pcl::SampleConsensusModelSphere<pcl::PointXYZ>>(points);
-        sphere_model->setRadiusLimits(config.min_sphere_radius, config.max_sphere_radius);
+        sphere_model->setRadiusLimits(min_radius, max_radius);
         
         pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(sphere_model);
         
-        ransac.setDistanceThreshold(config.ransac_model_distance_threshold);
+        ransac.setDistanceThreshold(ransac_model_distance_threshold);
 //        ransac.setMaxIterations(10);
         ransac.computeModel();
         Eigen::VectorXf coeffs;
@@ -260,7 +329,8 @@ public:
     }
     
     
-    static std::vector<cv::Point3f> reproject(const std::vector<cv::Point2i>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
+    static std::vector<cv::Point3f> reproject(const std::vector<cv::Point2i>& pixel_locations, 
+            const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
         
         const float& fx = focal_length.x;
         const float& fy = focal_length.y;
@@ -285,41 +355,32 @@ public:
         
     }
     
-    static std::vector<cv::Point3f> reprojectParallelized(const std::vector<cv::Point2i>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
+    static std::vector<cv::Point3f> reprojectParallelized(const std::vector<cv::Point2i>& pixel_locations, 
+            const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& image_center) {
         // Not yet working
-        
-        cv::Mat locations_mat(pixel_locations, false);
-        
-        const float& fx = focal_length.x;
-        const float& fy = focal_length.y;
-        const float& cx = center.x;
-        const float& cy = center.y;
         
         std::vector<cv::Point3f> points;
         points.reserve(pixel_locations.size());
+        cv::Mat locations_mat(pixel_locations, false); // convert from vector without copy
         
         locations_mat.forEach<cv::Point2i>(
-            [&fx, &fy, &cx, &cy, &depth_image, &points](const cv::Point2i& pixel, const int* position) -> void {
+            [&focal_length, &image_center, &depth_image, &points](const cv::Point2i& pixel, const int* position) -> void {
                 size_t index = position[0];
             
                 const float& z = depth_image.at<float>(pixel.y, pixel.x);
-                float x = z*(pixel.x - cx)/fx;
-                float y = z*(pixel.y - cy)/fy;
+                float x = z*(pixel.x - image_center.x)/focal_length.x;
+                float y = z*(pixel.y - image_center.y)/focal_length.y;
                 points.emplace(points.begin() + index, x, y, z);
             
             }
+            
         );
         
         return points;
-        
     }
     
-    static pcl::PointCloud<pcl::PointXYZ>::Ptr reprojectToCloud(const std::vector<cv::Point2i>& pixel_locations, const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
-        
-        const float& fx = focal_length.x;
-        const float& fy = focal_length.y;
-        const float& cx = center.x;
-        const float& cy = center.y;
+    static pcl::PointCloud<pcl::PointXYZ>::Ptr reprojectToCloud(const std::vector<cv::Point2i>& pixel_locations, 
+            const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& image_center) {
         
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = boost::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
         cloud->is_dense = false;
@@ -329,8 +390,8 @@ public:
             
             const float& z = depth_image.at<float>(pixel.y, pixel.x);
             if (not std::isnan(z)) {
-                float x = z*(pixel.x - cx)/fx;
-                float y = z*(pixel.y - cy)/fy;
+                float x = z*(pixel.x - image_center.x)/focal_length.x;
+                float y = z*(pixel.y - image_center.y)/focal_length.y;
                 cloud->push_back(pcl::PointXYZ(x, y, z));
             }
             
@@ -344,58 +405,43 @@ public:
         return this->circle_detections;
     }
     
-    void rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Mat& color_distortion_coeffs, const cv::Mat& color_camera_matrix) {
-        cv::Mat rgb_input;
-        cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
-        std::vector<CircleDetection> circles = this->detectCircles(rgb_input);
-        
-        cv::Point2f focal_length(color_camera_matrix.at<float>(0, 0), color_camera_matrix.at<float>(1, 1));
-        cv::Point2f center(color_camera_matrix.at<float>(0, 2), color_camera_matrix.at<float>(1, 2));
-        
-        std::vector<SphereDetection> spheres;
-        spheres.reserve(circles.size());
-        
-        for (const CircleDetection circle : circles) {
-            pcl::PointCloud<pcl::PointXYZ>::Ptr points = this->reprojectToCloud(circle.locations, depth_input, focal_length, center);
-            
-            if (points->size() > config.min_points_for_fitting) {
-                
-                SphereDetection sphere = this->fitSphericalModel(points);
-                sphere.color = circle.color;
-                
-                if (sphere.confidence > config.inlier_percentage_threshold) {
-                    spheres.push_back(std::move(sphere));
-                }
-                
-            } else {
-                std::cout << "Not enough points to fit model\n";
-            }
-        }
-        
+    const std::vector<SphereDetection>& getSphereDetections() {
+        return this->sphere_detections;
     }
     
 private:
     
     std::vector<CircleDetection> circle_detections;
-    bool visualize = true;
+    std::vector<SphereDetection> sphere_detections;
     
-    const std::map<Color, cv::Vec3f> colormap = {
-        {Color::RED, cv::Vec3f(.6860, .1381, .1757)},
-        {Color::GREEN, cv::Vec3f(.1722, .4837, .34)},
-        {Color::BLUE, cv::Vec3f(.0567, .3462, .6784)},
-        {Color::YELLOW, cv::Vec3f(.8467, .8047, .2646)},
-        {Color::ORANGE, cv::Vec3f(.7861, .1961, .0871)},
-    };
-    
-    size_t toInteger(Color color) const {
+    static size_t toInteger(Color color) {
         return static_cast<size_t>(color);
     }
     
-    Color toColor(size_t integer) const {
+    static Color toColor(size_t integer) {
         return static_cast<Color>(integer);
     }
     
-    cv::Mat classifyPixelColors(const cv::Mat& rgb_image, const float& colorful_threshold, const float& color_likelihood_threshold) const {
+    static std::map<Color, cv::Vec2f> projectColormap(const std::map<Color, cv::Vec3f>& colormap, 
+            const cv::Matx23f& projection_matrix, bool normalize) {
+        
+        std::map<Color, cv::Vec2f> projected_colormap;
+        
+        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
+            if (normalize) {
+                projected_colormap[color.first] = cv::normalize<float, 2>(projection_matrix*color.second);
+            } else {
+                projected_colormap[color.first] = projection_matrix*color.second;
+            }
+        }
+        
+        return projected_colormap;
+    }
+    
+    static cv::Mat classifyPixelColors(const cv::Mat& rgb_image, 
+            const std::map<Color, cv::Vec3f>& colormap,
+            float colorful_threshold, 
+            float color_likelihood_threshold) {
                 
         cv::Mat colorful(rgb_image.rows, rgb_image.cols, CV_8UC1);
         cv::Mat color_classes(rgb_image.rows, rgb_image.cols, CV_8UC1);
@@ -407,7 +453,8 @@ private:
                 v1_perp(0), v1_perp(1), v1_perp(2), 
                 v2_perp(0), v2_perp(1), v2_perp(2)
         };
-        std::map<Color, cv::Vec2f> projected_colormap = this->projectColormap(orthogonal_projection, true);
+        std::map<Color, cv::Vec2f> projected_colormap = 
+                SphereDetector::projectColormap(colormap, orthogonal_projection, true);
         
         rgb_image.forEach<cv::Vec3f>(
             [&](const cv::Vec3f& pixel, const int* position) -> void {
@@ -450,20 +497,6 @@ private:
         return color_classes;
     }
     
-    std::map<Color, cv::Vec2f> projectColormap(const cv::Matx23f& projection_matrix, bool normalize) const {
-        std::map<Color, cv::Vec2f> projected_colormap;
-        
-        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-            if (normalize) {
-                projected_colormap[color.first] = cv::normalize<float, 2>(projection_matrix*color.second);
-            } else {
-                projected_colormap[color.first] = projection_matrix*color.second;
-            }
-        }
-        
-        return projected_colormap;
-    }
-    
     std::tuple<cv::Mat, cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) const {
         size_t n = points.rows;
         
@@ -485,21 +518,6 @@ private:
         return a - vectorProjection(a, b);
     }
     
-    cv::Matx<float, 3, 5> colorsToMatrix() const {
-        // Matrix of column vectors
-        cv::Matx<float, 3, 5> result;
-        
-        size_t col = 0;
-        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-            result(0, col) = color.second(0);
-            result(1, col) = color.second(1);
-            result(2, col) = color.second(2);
-            col++;
-        }
-        
-        return result;
-    }
-    
     template <typename NumericType, int rows, int cols>
     cv::Matx<NumericType, rows, cols> normalizeColumns(const cv::Matx<NumericType, rows, cols>& input_matrix) const {
         cv::Matx<NumericType, rows, cols> normalized;
@@ -515,7 +533,7 @@ private:
         return normalized;
     }
     
-    cv::Mat imagesc(const cv::Mat& input) const {
+    static cv::Mat imagesc(const cv::Mat& input) {
         double min;
         double max;
         cv::minMaxIdx(input, &min, &max);
