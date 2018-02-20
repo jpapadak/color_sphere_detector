@@ -406,7 +406,7 @@ public:
     }
     
     const std::vector<SphereDetection>& getSphereDetections() {
-        return this->sphere_detections;
+        return sphere_detections;
     }
     
 private:
