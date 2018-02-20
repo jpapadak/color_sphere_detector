@@ -135,7 +135,6 @@ public:
             
         }
         
-        circle_detections = circles;
         sphere_detections = spheres;
         
         return spheres;
@@ -406,17 +405,12 @@ public:
         return cloud;
     }
     
-    const std::vector<CircleDetection>& getCircleDetections() {
-        return this->circle_detections;
-    }
-    
     const std::vector<SphereDetection>& getSphereDetections() {
         return this->sphere_detections;
     }
     
 private:
     
-    std::vector<CircleDetection> circle_detections;
     std::vector<SphereDetection> sphere_detections;
     
     static size_t toInteger(Color color) {
