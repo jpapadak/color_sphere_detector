@@ -5,7 +5,7 @@
  * Created on January 25, 2018, 2:41 PM
  */
 
-#include <SphereDectector.hpp>
+#include <colored_sphere_detector/SphereDetector.hpp>
 #include <rgbd_drivers_uncc/rgbd_driver.hpp>
 
 extern volatile bool run;

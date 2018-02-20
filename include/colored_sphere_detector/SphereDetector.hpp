@@ -361,7 +361,7 @@ public:
             const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& image_center) {
         
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = boost::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        cloud->is_dense = false;
+        cloud->is_dense = true;
         cloud->reserve(pixel_locations.size());
         
         for (const cv::Point2i& pixel : pixel_locations) {

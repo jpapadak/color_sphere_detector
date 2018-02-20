@@ -5,7 +5,7 @@
  * Created on February 6, 2018, 7:15 PM
 */
 
-#include <SphereDectector.hpp>
+#include <colored_sphere_detector/SphereDetector.hpp>
 
 
 int main(int argc, char** argv) {

@@ -24,6 +24,7 @@ catkin_package(
     INCLUDE_DIRS include
     CATKIN_DEPENDS rgbd_drivers_uncc
     DEPENDS OpenCV Boost PCL
+    LIBRARIES ${PROJECT_NAME}
 )
 
 include_directories(
@@ -35,6 +36,15 @@ include_directories(
 )
 
 link_directories(/opt/ros/kinetic/lib) # needed to find OpenNI2Orbbec
+
+add_library(${PROJECT_NAME} INTERFACE)
+target_include_directories(${PROJECT_NAME} INTERFACE include/)
+target_link_libraries(${PROJECT_NAME} INTERFACE
+    ${catkin_LIBRARIES} 
+    ${OpenCV_LIBRARIES}
+    ${PCL_LIBRARIES}
+)
+    
 
 add_executable(${PROJECT_NAME}_bagfile 
     src/bagfile.cpp
