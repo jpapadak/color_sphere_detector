@@ -45,11 +45,11 @@ public:
         // Color classification parameters
         
         std::map<Color, cv::Vec3f> colormap = {
-            {Color::RED, cv::Vec3f(.6860, .1381, .1757)},
-            {Color::GREEN, cv::Vec3f(.1722, .4837, .34)},
-            {Color::BLUE, cv::Vec3f(.0567, .3462, .6784)},
-            {Color::YELLOW, cv::Vec3f(.8467, .8047, .2646)},
-            {Color::ORANGE, cv::Vec3f(.7861, .1961, .0871)},
+            {Color::RED, cv::Vec3f(0.6920, 0.2688, 0.27207)},
+            {Color::GREEN, cv::Vec3f(0.2264, 0.4306, 0.3068)},
+            {Color::BLUE, cv::Vec3f(0.1520, 0.3446, 0.5130)},
+            {Color::YELLOW, cv::Vec3f(0.7520, 0.7206, 0.2898)},
+            {Color::ORANGE, cv::Vec3f(0.6528, 0.2496, 0.1616)},
         };
         float colorful_threshold = .10; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
         float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
@@ -57,7 +57,7 @@ public:
         // Circle detection parameters
         
         float bounding_box_ratio_threshold = .94; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
-        float min_circle_radius = 10; // minimum radius of candidate circle in pixels
+        float min_circle_radius = 6; // minimum radius of candidate circle in pixels
         float max_circle_radius = 50; // maximum radius of candidate circle in pixels
         float circular_fill_ratio_threshold = .8; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
         float component_area_ratio_threshold = .95; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
@@ -67,8 +67,8 @@ public:
         size_t min_points_for_fitting = 10;
         float ransac_model_distance_threshold = .008; // distance from the spherical model within which point is considered an inlier
         float min_sphere_radius = .02; // meters
-        float max_sphere_radius = .07; // meters
-        float inlier_percentage_threshold = .7; // percentage of data within distance threshold of the refined model, used to accept or reject detection
+        float max_sphere_radius = .045; // meters
+        float inlier_percentage_threshold = .74; // percentage of data within distance threshold of the refined model, used to accept or reject detection
         
     } config;
     
