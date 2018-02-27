@@ -68,7 +68,7 @@ public:
         float ransac_model_distance_threshold = .008; // distance from the spherical model within which point is considered an inlier
         float min_sphere_radius = .02; // meters
         float max_sphere_radius = .045; // meters
-        float inlier_percentage_threshold = .74; // percentage of data within distance threshold of the refined model, used to accept or reject detection
+        float inlier_percentage_threshold = .6; // percentage of data within distance threshold of the refined model, used to accept or reject detection
         
     } config;
     

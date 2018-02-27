@@ -11,8 +11,6 @@
 int main(int argc, char** argv) {
     SphereDetector detector;
     detector.config.visualize = true;
-    detector.config.margin_x = 100; 
-    detector.config.margin_y = 75;
     
     std::cout << "Opening bag file: " << argv[1] << " for reading...\n";
     RGBD_BagFile_Driver bagfile_reader(argv[1]);
@@ -22,11 +20,11 @@ int main(int argc, char** argv) {
     bagfile_reader.setCallback(callback);
 
     std::vector<std::string> topics;
-    topics.push_back(std::string("/camera/rgb/image_color"));
-    //topics.push_back(std::string("/camera/rgb/input_image"));
+//    topics.push_back(std::string("/camera/rgb/image_color"));
+    topics.push_back(std::string("/camera/rgb/image_raw"));
     topics.push_back(std::string("/camera/rgb/camera_info"));
-    //topics.push_back(std::string("/camera/depth_registered/input_image"));
-    topics.push_back(std::string("/camera/depth/image"));
+    topics.push_back(std::string("/camera/depth_registered/image_raw"));
+//    topics.push_back(std::string("/camera/depth/image"));
     bagfile_reader.setTopics(topics);
     
     while(bagfile_reader.readNextRGBDMessage()) {
