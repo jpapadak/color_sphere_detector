@@ -45,11 +45,11 @@ public:
         // Color classification parameters
         
         std::map<Color, cv::Vec3f> colormap = {
-            {Color::RED, cv::Vec3f(0.6920, 0.2688, 0.27207)},
+            {Color::RED, cv::Vec3f(0.6800, 0.1400, 0.1800)},
             {Color::GREEN, cv::Vec3f(0.2264, 0.4306, 0.3068)},
             {Color::BLUE, cv::Vec3f(0.1520, 0.3446, 0.5130)},
             {Color::YELLOW, cv::Vec3f(0.7520, 0.7206, 0.2898)},
-            {Color::ORANGE, cv::Vec3f(0.6528, 0.2496, 0.1616)},
+            {Color::ORANGE, cv::Vec3f(0.7900, 0.200, .0900)},
         };
         float colorful_threshold = .10; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
         float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
@@ -279,7 +279,7 @@ public:
                 cv::Vec3f colorvec = 255*colormap.at(detection.color);
                 cv::circle(output, cv::Point2f(detection.x, detection.y), detection.radius, 
                         cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
-                cv::putText(output, "r = " + std::to_string(detection.radius), 
+                cv::putText(output, toString(detection.color) + ", " + std::to_string(detection.radius), 
                         cv::Point2i(detection.x - detection.radius, detection.y - detection.radius - 3), 
                         cv::FONT_HERSHEY_PLAIN, 0.6, cv::Scalar(colorvec[0], colorvec[1], colorvec[2]));
             }
@@ -419,6 +419,35 @@ private:
     
     static Color toColor(size_t integer) {
         return static_cast<Color>(integer);
+    }
+    
+    static std::string toString(Color color) {
+        
+        switch(color) {
+            
+            case Color::RED:
+                return "red";
+                break;
+            case Color::GREEN:
+                return "green";
+                break;
+            case Color::BLUE:
+                return "blue";
+                break;
+            case Color::ORANGE:
+                return "orange";
+                break;
+            case Color::YELLOW:
+                return "yellow";
+                break;
+            case Color::OTHER:
+                return "other";
+                break;
+            default:
+                throw std::invalid_argument("Invalid color to string conversion requested!");
+                
+        }
+        
     }
     
     static std::map<Color, cv::Vec2f> projectColormap(const std::map<Color, cv::Vec3f>& colormap, 
