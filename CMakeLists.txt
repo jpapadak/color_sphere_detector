@@ -23,7 +23,7 @@ endif()
 catkin_package(
     INCLUDE_DIRS include
     CATKIN_DEPENDS rgbd_drivers_uncc
-    DEPENDS OpenCV Boost PCL
+#    DEPENDS OpenCV Boost PCL
     LIBRARIES ${PROJECT_NAME}
 )
 
