@@ -317,7 +317,7 @@ public:
         // Percentage of points within distance threshold of model
         float inlier_ratio = ransac.inliers_.size()/static_cast<float>(points->size());
         
-        std::cout << "Sphere coeffs: " << coeffs.transpose() << ", confidence: " << inlier_ratio << "\n";
+//        std::cout << "Sphere coeffs: " << coeffs.transpose() << ", confidence: " << inlier_ratio << "\n";
         
         SphereDetection sphere;
         sphere.x = coeffs[0];
