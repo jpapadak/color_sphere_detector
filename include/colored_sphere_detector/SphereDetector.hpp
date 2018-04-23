@@ -64,6 +64,8 @@ public:
         
         // Sphere fitting parameters
         
+        cv::Point2f focal_length = cv::Point2f(500, 500);
+        cv::Point2f image_center = cv::Point2f(320, 240);
         size_t min_points_for_fitting = 10;
         float ransac_model_distance_threshold = .008; // distance from the spherical model within which point is considered an inlier
         float min_sphere_radius = .02; // meters
@@ -95,39 +97,36 @@ public:
     virtual ~SphereDetector() {
     }
     
-    void rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, 
+    std::vector<SphereDetection> rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, 
             const cv::Mat& distortion_coeffs, const cv::Mat& camera_matrix) {
         
         cv::Mat rgb_input;
         cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
         cv::Point2f focal_length(camera_matrix.at<float>(0, 0), camera_matrix.at<float>(1, 1));
         cv::Point2f image_center(camera_matrix.at<float>(0, 2), camera_matrix.at<float>(1, 2));
+        config.focal_length = focal_length;
+        config.image_center = image_center;
         
-        this->detect(rgb_input, depth_input, focal_length, image_center);
+        return this->detect(rgb_input, depth_input);
         
     }
     
-    std::vector<SphereDetection> detect(const cv::Mat& rgb_input, const cv::Mat& depth_input, 
-            const cv::Point2f& focal_length, const cv::Point2f& image_center) {
-        
-        const size_t min_points_for_fitting = config.min_points_for_fitting;
-        const float inlier_percentage_threshold = config.inlier_percentage_threshold;
+    std::vector<SphereDetection> detect(const cv::Mat& rgb_input, const cv::Mat& depth_input) {
         
         std::vector<CircleDetection> circles = this->detectCircles(rgb_input);
-        
         std::vector<SphereDetection> spheres;
         spheres.reserve(circles.size());
         
         for (const CircleDetection circle : circles) {
             pcl::PointCloud<pcl::PointXYZ>::Ptr points = 
-                    this->reprojectToCloud(circle.locations, depth_input, focal_length, image_center);
+                    this->reprojectToCloud(circle.locations, depth_input, config.focal_length, config.image_center);
             
-            if (points->size() > min_points_for_fitting) {
+            if (points->size() > config.min_points_for_fitting) {
                 
                 SphereDetection sphere = this->fitSphericalModel(points);
                 sphere.color = circle.color;
                 
-                if (sphere.confidence > inlier_percentage_threshold) {
+                if (sphere.confidence > config.inlier_percentage_threshold) {
                     spheres.push_back(std::move(sphere));
                 }
                 
