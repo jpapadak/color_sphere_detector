@@ -97,13 +97,16 @@ public:
     virtual ~SphereDetector() {
     }
     
-    std::vector<SphereDetection> rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, 
-            const cv::Mat& distortion_coeffs, const cv::Mat& camera_matrix) {
+//    std::vector<SphereDetection> rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Mat& camera_matrix) {
+//        return this->rgbd_callback(color_input, depth_input, static_cast<const cv::Mat3f&>(camera_matrix));
+//    }
+    
+    std::vector<SphereDetection> rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Matx33f& camera_matrix) {
         
         cv::Mat rgb_input;
         cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
-        cv::Point2f focal_length(camera_matrix.at<float>(0, 0), camera_matrix.at<float>(1, 1));
-        cv::Point2f image_center(camera_matrix.at<float>(0, 2), camera_matrix.at<float>(1, 2));
+        cv::Point2f focal_length(camera_matrix(0, 0), camera_matrix(1, 1));
+        cv::Point2f image_center(camera_matrix(0, 2), camera_matrix(1, 2));
         config.focal_length = focal_length;
         config.image_center = image_center;
         
@@ -522,6 +525,11 @@ private:
         );
         
         return color_classes;
+    }
+    
+    float evaluateGaussianLikelihood1D(float , float mean, float variance) {
+        
+        
     }
     
     std::tuple<cv::Mat, cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) const {

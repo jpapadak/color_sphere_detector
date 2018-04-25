@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     RGBD_BagFile_Driver bagfile_reader(argv[1]);
     
     boost::function<void (cv::Mat&, cv::Mat&, cv::Mat&, cv::Mat&)> callback(
-            boost::bind(&SphereDetector::rgbd_callback, &detector, _1, _2, _3, _4));    
+            boost::bind(&SphereDetector::rgbd_callback, &detector, _1, _2, _4));    
     bagfile_reader.setCallback(callback);
 
     std::vector<std::string> topics;

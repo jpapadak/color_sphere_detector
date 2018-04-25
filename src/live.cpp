@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     RGBD_OpenCV_Driver rgbd_driver;
     
     boost::function<void (cv::Mat&, cv::Mat&, cv::Mat&, cv::Mat&)> callback(
-            boost::bind(&SphereDetector::rgbd_callback, &detector, _1, _2, _3, _4));    
+            boost::bind(&SphereDetector::rgbd_callback, &detector, _1, _2, _4));    
     rgbd_driver.setCallback(callback);
 
     rgbd_driver.initialize();
