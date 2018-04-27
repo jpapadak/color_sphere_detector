@@ -51,6 +51,13 @@ public:
             {Color::YELLOW, cv::Vec3f(0.7520, 0.7206, 0.2898)},
             {Color::ORANGE, cv::Vec3f(0.7900, 0.200, .0900)},
         };
+//        std::map<Color, cv::Matx22f> projected_color_covariance = {
+//            {Color::RED, cv::Matx22f(0.0090, -0.0050, -0.0050, 0.0028)},
+//            {Color::GREEN, cv::Matx22f(0.0024, 0.0003, 0.0003, 0.0001)},
+//            {Color::BLUE, cv::Matx22f(0.0024, -0.0038, -0.0038, 0.0062)},
+//            {Color::YELLOW, cv::Matx22f(0.0001, -0.0009, -0.0009, 0.0143)},
+//            {Color::ORANGE, cv::Matx22f(0.0107, -0.0088, -0.0088, 0.0072)},
+//        };
         float colorful_threshold = .10; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
         float color_likelihood_threshold = .98; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
         
@@ -502,6 +509,8 @@ private:
                     for (const std::pair<Color, cv::Vec2f>& color : projected_colormap) {
                         const cv::Vec2f& color_vector = color.second;
                         
+//                        SphereDetector::evaluateGaussianLogLikelihood(pixel_vector, color_vector, cv::Matx22f::eye());
+                        
                         float color_likelihood = 0.5*(cv::normalize<float, 2>(pixel_vector).dot(color_vector) + 1);
                         
                         if (color_likelihood > max_color_likelihood) {
@@ -527,9 +536,10 @@ private:
         return color_classes;
     }
     
-    float evaluateGaussianLikelihood1D(float , float mean, float variance) {
-        
-        
+    template <typename NumericType, int size>
+    static NumericType evaluateGaussianLogLikelihood(const cv::Vec<NumericType, size>& x, const cv::Vec<NumericType, size>& mean, const cv::Matx<NumericType, size, size>& covariance) {
+        cv::Vec<NumericType, size> x_minus_mu = x - mean;
+        return -0.5*((x_minus_mu.t()*covariance.inv()*x_minus_mu)[0] + std::log(cv::determinant(covariance)));
     }
     
     std::tuple<cv::Mat, cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) const {

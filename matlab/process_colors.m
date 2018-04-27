@@ -1,9 +1,12 @@
 
-[rows, cols, channels] = size(maskedRGBImage);
-indices = find(BW);
-pixels = double(reshape(maskedRGBImage, [rows*cols, 3]));
-pixels = pixels(indices, :)/255;
-mean(pixels)
+
+[I, ~, alpha] = imread('blue_ball.png');
+[rows, cols, channels] = size(I);
+% subplot(1, 2, 1), imshow(I);
+
+pixels = double(reshape(I, [rows*cols, 3]));
+pixels(alpha == 0, :) = 0;
+pixels = pixels/255;
 
 ortho_projection = [ 
     % perpendicular vectors in the (1, 1, 1) plane
@@ -11,11 +14,27 @@ ortho_projection = [
     0.408248290463863, 0.408248290463863, -0.816496580927726
 ];
 
-proj_pixels = ortho_projection*pixels';
-angles = atan2(proj_pixels(2, :), proj_pixels(1, :));
+proj_pixels = (ortho_projection*pixels')';
+radius = sqrt(sum(proj_pixels.^2, 2));
+angles = atan2(proj_pixels(:, 2), proj_pixels(:, 1));
+colorful_threshold = .04;
 
-avg = mean(angles)
-var = cov(angles)
+Icolorful = pixels;
+Icolorful(radius < colorful_threshold, :) = 0;
+Icolorful = reshape(Icolorful, [rows, cols, 3]);
+% subplot(1, 2, 2), imshow(Icolorful, []);
+
+colorful_pixels = pixels(radius > colorful_threshold, :);
+colorful_proj_pixels = proj_pixels(radius > colorful_threshold, :);
+
+color_mean = mean(colorful_pixels)
+color_cov = cov(colorful_pixels)
+color_radius = radius(radius > colorful_threshold);
+color_angles = angles(radius > colorful_threshold);
+
+avg = mean(colorful_proj_pixels)
+var = cov(colorful_proj_pixels)
+figure(2), plot_gaussian_ellipsoid(avg, var), axis([-1, 1, -1, 1]);
 
 % red, 0.6920, 0.2688, 0.2720, mu 2.6243, var 2.6838e-05
 % green, 0.2264, 0.4306, 0.3068, mu 0.1280, var 6.2498e-04
