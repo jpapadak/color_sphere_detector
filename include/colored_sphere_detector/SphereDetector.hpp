@@ -46,14 +46,14 @@ public:
         
         std::map<Color, cv::Vec3f> colormap = {
             {Color::RED, cv::Vec3f(0.6636, 0.1600, 0.2000)},
-            {Color::GREEN, cv::Vec3f(0.1421, 0.4064, 0.2712)},
-            {Color::BLUE, cv::Vec3f(0.0861, 0.4006, 0.7245)},
+            {Color::GREEN, cv::Vec3f(0.1387, 0.4116, 0.2718)},
+            {Color::BLUE, cv::Vec3f(0.0659, 0.3986, 0.7374)},
             {Color::YELLOW, cv::Vec3f(0.8320, 0.7906, 0.2898)},
             {Color::ORANGE, cv::Vec3f(0.7900, 0.2218, .1046)},
         };
         
-        float colorful_threshold = .05; // magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
-        float color_likelihood_threshold = 0; // scaled dot product between the pixel color vector and the class color vectors, range 0 to 1
+        float colorful_threshold = .08; // minimum magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
+        float color_likelihood_threshold = -70; // minimum likelihood value for pixel to not be classified as other
         
         // Circle detection parameters
         
@@ -414,6 +414,8 @@ public:
     
 private:
     
+    static constexpr double pi = std::acos(-1.0);
+    
     std::vector<SphereDetection> sphere_detections;
     
     static size_t toInteger(Color color) {
@@ -489,8 +491,8 @@ private:
         
         std::map<Color, cv::Matx22f> projected_color_covariance = {
             {Color::RED, cv::Matx22f(0.0066, -0.0034, -0.0034, 0.0024)},
-            {Color::GREEN, cv::Matx22f(0.0052, -0.0005, -0.0005, 0.0004)},
-            {Color::BLUE, cv::Matx22f(0.0071, -0.0066, -0.0066, 0.0089)},
+            {Color::GREEN, cv::Matx22f(0.006, -0.0005, -0.0005, 0.001)},
+            {Color::BLUE, cv::Matx22f(0.0057, -0.0042, -0.0042, 0.0051)},
             {Color::YELLOW, cv::Matx22f(0.0004, 0.0004, 0.0004, 0.0128)},
             {Color::ORANGE, cv::Matx22f(0.0035, -0.0035, -0.0035, 0.0048)},
         };
@@ -507,12 +509,14 @@ private:
                     colorful.at<int8_t>(row, col) = true;
                     
                     Color pixel_color = Color::OTHER;
-                    float max_color_likelihood = 0;
+                    float max_color_likelihood = -std::numeric_limits<float>::infinity();
                     for (const std::pair<Color, cv::Vec2f>& color : projected_colormap) {
                         const cv::Vec2f& color_vector = color.second;
                         
-                        float color_likelihood = SphereDetector::evaluateGaussianPDF(pixel_vector, color_vector, projected_color_covariance[color.first]);
 //                        float color_likelihood = 0.5*(cv::normalize<float, 2>(pixel_vector).dot(color_vector) + 1);
+//                        float color_likelihood = SphereDetector::evaluateGaussianPDF(pixel_vector, color_vector, projected_color_covariance[color.first]);
+                        float color_likelihood = SphereDetector::evaluateGaussianLogLikelihood(pixel_vector, color_vector, projected_color_covariance[color.first]);
+//                        
                         
                         if (color_likelihood > max_color_likelihood) {
                             max_color_likelihood = color_likelihood;
@@ -540,13 +544,14 @@ private:
     template <typename NumericType, int size>
     static NumericType evaluateGaussianPDF(const cv::Vec<NumericType, size>& x, const cv::Vec<NumericType, size>& mean, const cv::Matx<NumericType, size, size>& covariance) {
         cv::Vec<NumericType, size> x_minus_mu = x - mean;
-        return 1/(2*3.14*std::sqrt(cv::determinant(covariance)))*std::exp(-0.5*(x_minus_mu.t()*covariance.inv()*x_minus_mu)[0]);
+        return 1/(std::pow(2*pi, size/2.0)*std::sqrt(cv::determinant(covariance)))*std::exp(-0.5*(x_minus_mu.t()*covariance.inv()*x_minus_mu)[0]);
     }
     
     template <typename NumericType, int size>
     static NumericType evaluateGaussianLogLikelihood(const cv::Vec<NumericType, size>& x, const cv::Vec<NumericType, size>& mean, const cv::Matx<NumericType, size, size>& covariance) {
+        constexpr NumericType term1 = size*std::log(2*pi);
         cv::Vec<NumericType, size> x_minus_mu = x - mean;
-        return -0.5*((x_minus_mu.t()*covariance.inv()*x_minus_mu)[0] + std::log(cv::determinant(covariance)));
+        return -0.5*(term1 + std::log(cv::determinant(covariance)) + (x_minus_mu.t()*covariance.inv()*x_minus_mu)[0]);
     }
     
     std::tuple<cv::Mat, cv::Mat, cv::Mat> computeMeanAndCovariance(const cv::Mat& points) const {

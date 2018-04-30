@@ -1,7 +1,7 @@
 clear;
 close all;
 
-[I, ~, alpha] = imread('green_real.png');
+[I, ~, alpha] = imread('red_real.png');
 [rows, cols, channels] = size(I);
 subplot(1, 2, 1), imshow(I);
 
@@ -18,7 +18,7 @@ ortho_projection = [
 proj_pixels = (ortho_projection*pixels')';
 radius = sqrt(sum(proj_pixels.^2, 2));
 angles = atan2(proj_pixels(:, 2), proj_pixels(:, 1));
-colorful_threshold = .04;
+colorful_threshold = .25;
 
 Icolorful = pixels;
 Icolorful(radius < colorful_threshold, :) = 0;
@@ -35,7 +35,7 @@ color_angles = angles(radius > colorful_threshold);
 
 avg = mean(colorful_proj_pixels)
 var = cov(colorful_proj_pixels)
-figure, plot(colorful_proj_pixels(:,1), colorful_proj_pixels(:,2), '.', 'color', color_mean), hold on; plot_gaussian_ellipsoid(avg, var), axis([-1, 1, -1, 1]);
+figure(2), plot(colorful_proj_pixels(:,1), colorful_proj_pixels(:,2), '.', 'color', color_mean), hold on; plot_gaussian_ellipsoid(avg, var, 1), plot_gaussian_ellipsoid(avg, var, 2), axis([-1, 1, -1, 1]);
 
 % red, 0.6920, 0.2688, 0.2720, mu 2.6243, var 2.6838e-05
 % green, 0.2264, 0.4306, 0.3068, mu 0.1280, var 6.2498e-04
