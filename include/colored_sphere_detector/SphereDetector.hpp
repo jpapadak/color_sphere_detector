@@ -34,6 +34,86 @@ enum class Color {
 class SphereDetector {
 public:
     
+    SphereDetector() {    
+    }
+    
+    virtual ~SphereDetector() {
+    }
+    
+    template <typename NumericType, int size>
+    class Gaussian {
+        
+        cv::Vec<NumericType, size> mean;
+        cv::Matx<NumericType, size, size> covariance;
+        cv::Matx<NumericType, size, size> inv_covariance;
+        NumericType det_covariance;
+        NumericType log_det_covariance;
+        NumericType normalization_factor;
+        static constexpr NumericType pi = std::acos(-1);
+        static constexpr NumericType nlog2pi = size*std::log(2*pi);
+        
+        void precomputeTerms() {
+            this->inv_covariance = covariance.inv();
+            this->det_covariance = cv::determinant(covariance);
+            this->normalization_factor = 1/std::sqrt(std::pow(2*pi, size)*this->det_covariance);
+        }
+        
+    public:
+        
+        Gaussian() {
+        }
+        
+        Gaussian(const cv::Vec<NumericType, size>& mean, const cv::Matx<NumericType, size, size>& covariance) {
+            this->mean = mean;
+            this->covariance = covariance;
+            this->precomputeTerms();
+        }
+        
+        NumericType evaluate(const cv::Vec<NumericType, size>& x) const {
+            cv::Vec<NumericType, size> x_minus_mu = x - mean;
+            return normalization_factor*std::exp(-0.5*(x_minus_mu.t()*inv_covariance*x_minus_mu)[0]);
+        }
+        
+        NumericType evaluateLogLikelihood(const cv::Vec<NumericType, size>& x) const {
+            cv::Vec<NumericType, size> x_minus_mu = x - mean;
+            return -0.5*(nlog2pi + log_det_covariance + (x_minus_mu.t()*inv_covariance*x_minus_mu)[0]);
+        }
+        
+        template <typename T, int n, int m>
+        static Gaussian<T, n> transform(const Gaussian<T, m>& input, const cv::Matx<T, n, m>& transformation_matrix) {
+            return Gaussian<T, n>(transformation_matrix*input.getMean(), transformation_matrix*input.getCovariance()*transformation_matrix.t());
+        }
+        
+        template <int newsize>
+        void transform(const cv::Matx<NumericType, newsize, size>& transformation_matrix) {
+            *this = Gaussian::transform(*this, transformation_matrix);
+        }
+        
+        void setMean(const cv::Vec<NumericType, size>& mean) {
+            this->mean = mean;
+        }
+        
+        const cv::Vec<NumericType, size>& getMean() const {
+            return mean;
+        }
+        
+        void setCovariance(const cv::Matx<NumericType, size, size>& covariance) {
+            this->covariance = covariance;
+            this->precomputeTerms();
+        }
+        
+        const cv::Matx<NumericType, size, size>& getCovariance() const {
+            return covariance;
+        }
+        
+        const cv::Matx<NumericType, size, size>& getInverseCovariance() const {
+            return inv_covariance;
+        }
+        
+        
+
+    };
+    
     struct Configuration {
         
         bool visualize = false;
@@ -44,12 +124,27 @@ public:
         
         // Color classification parameters
         
-        std::map<Color, cv::Vec3f> colormap = {
-            {Color::RED, cv::Vec3f(0.6636, 0.1600, 0.2000)},
-            {Color::GREEN, cv::Vec3f(0.1387, 0.4116, 0.2718)},
-            {Color::BLUE, cv::Vec3f(0.0659, 0.3986, 0.7374)},
-            {Color::YELLOW, cv::Vec3f(0.8320, 0.7906, 0.2898)},
-            {Color::ORANGE, cv::Vec3f(0.7900, 0.2218, .1046)},
+        std::map<Color, Gaussian<float, 3>> color_class_map = {
+            {Color::RED, Gaussian<float, 3>(cv::Vec3f(0.6636, 0.1600, 0.2000), cv::Matx33f(
+                    0.0155, 0.0062, 0.0073, 
+                    0.0062, 0.0064, 0.0067, 
+                    0.0073, 0.0067, 0.0078))},
+            {Color::GREEN, Gaussian<float, 3>(cv::Vec3f(0.1387, 0.4116, 0.2718), cv::Matx33f(
+                    0.0066, 0.0080, 0.0080, 
+                    0.0080, 0.0193, 0.0152, 
+                    0.0080, 0.0152, 0.0134))},
+            {Color::BLUE, Gaussian<float, 3>(cv::Vec3f(0.0659, 0.3986, 0.7374), cv::Matx33f(
+                    0.0113, 0.0083, 0.0034,
+                    0.0083, 0.0193, 0.0186, 
+                    0.0034, 0.0186, 0.0230))},
+            {Color::YELLOW, Gaussian<float, 3>(cv::Vec3f(0.8320, 0.7906, 0.2898), cv::Matx33f(
+                    0.0154, 0.0174, 0.0073,
+                    0.0174, 0.0202, 0.0088,
+                    0.0073, 0.0088, 0.0149))},
+            {Color::ORANGE, Gaussian<float, 3>(cv::Vec3f(0.7900, 0.2218, .1046), cv::Matx33f(
+                    0.0140, 0.0070, 0.0016,
+                    0.0070, 0.0069, 0.0041,
+                    0.0016, 0.0041, 0.0041))},
         };
         
         float colorful_threshold = .08; // minimum magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
@@ -57,11 +152,11 @@ public:
         
         // Circle detection parameters
         
-        float bounding_box_ratio_threshold = .94; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
+        float bounding_box_ratio_threshold = .9; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
         float min_circle_radius = 6; // minimum radius of candidate circle in pixels
         float max_circle_radius = 50; // maximum radius of candidate circle in pixels
         float circular_fill_ratio_threshold = .8; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
-        float component_area_ratio_threshold = .95; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
+        float component_area_ratio_threshold = .94; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
         
         // Sphere fitting parameters
         
@@ -91,16 +186,6 @@ public:
         float confidence;
         Color color;
     };
-    
-    SphereDetector() {    
-    }
-    
-    virtual ~SphereDetector() {
-    }
-    
-//    std::vector<SphereDetection> rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Mat& camera_matrix) {
-//        return this->rgbd_callback(color_input, depth_input, static_cast<const cv::Mat3f&>(camera_matrix));
-//    }
     
     std::vector<SphereDetection> rgbd_callback(const cv::Mat& color_input, const cv::Mat& depth_input, const cv::Matx33f& camera_matrix) {
         
@@ -146,7 +231,7 @@ public:
     
     std::vector<CircleDetection> detectCircles(const cv::Mat& rgb_input) {
         return std::move(this->detectCircles(rgb_input, 
-                    config.colormap, config.margin_x, config.margin_y, 
+                    config.color_class_map, config.margin_x, config.margin_y, 
                     config.colorful_threshold, config.color_likelihood_threshold, 
                     config.bounding_box_ratio_threshold, 
                     config.min_circle_radius, config.max_circle_radius, 
@@ -156,7 +241,7 @@ public:
     }
     
     static std::vector<CircleDetection> detectCircles(const cv::Mat& rgb_input, 
-            const std::map<Color, cv::Vec3f>& colormap,
+            const std::map<Color, Gaussian<float, 3>>& color_class_map,
             size_t margin_x, size_t margin_y, 
             float colorful_threshold, float color_likelihood_threshold, 
             float bounding_box_ratio_threshold, float min_radius, float max_radius, 
@@ -176,7 +261,7 @@ public:
         }
         
         cv::Mat color_classified_image = 
-                SphereDetector::classifyPixelColors(rgb_image, colormap, colorful_threshold, color_likelihood_threshold);
+                SphereDetector::classifyPixelColors(rgb_image, color_class_map, colorful_threshold, color_likelihood_threshold);
         
         cv::Mat class_and_components;
         if (visualize) {
@@ -184,7 +269,7 @@ public:
         }
         
         std::vector<CircleDetection> detections;
-        for (const std::pair<Color, cv::Vec3f>& entry : colormap) {
+        for (const std::pair<Color, Gaussian<float, 3>>& entry : color_class_map) {
             // For each color class, compute color mask and run connected components on mask
             
             Color color = entry.first;
@@ -279,7 +364,7 @@ public:
             }
             
             for (const CircleDetection& detection : detections) {
-                cv::Vec3f colorvec = 255*colormap.at(detection.color);
+                cv::Vec3f colorvec = 255*color_class_map.at(detection.color).getMean();
                 cv::circle(output, cv::Point2f(detection.x, detection.y), detection.radius, 
                         cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
                 cv::putText(output, toString(detection.color) + ", " + std::to_string(detection.radius), 
@@ -455,24 +540,8 @@ private:
         
     }
     
-    static std::map<Color, cv::Vec2f> projectColormap(const std::map<Color, cv::Vec3f>& colormap, 
-            const cv::Matx23f& projection_matrix, bool normalize) {
-        
-        std::map<Color, cv::Vec2f> projected_colormap;
-        
-        for (const std::pair<Color, cv::Vec3f>& color : colormap) {
-            if (normalize) {
-                projected_colormap[color.first] = cv::normalize<float, 2>(projection_matrix*color.second);
-            } else {
-                projected_colormap[color.first] = projection_matrix*color.second;
-            }
-        }
-        
-        return projected_colormap;
-    }
-    
     static cv::Mat classifyPixelColors(const cv::Mat& rgb_image, 
-            const std::map<Color, cv::Vec3f>& colormap,
+            const std::map<Color, Gaussian<float, 3>>& color_class_map,
             float colorful_threshold, 
             float color_likelihood_threshold) {
                 
@@ -486,16 +555,11 @@ private:
                 v1_perp(0), v1_perp(1), v1_perp(2), 
                 v2_perp(0), v2_perp(1), v2_perp(2)
         };
-        std::map<Color, cv::Vec2f> projected_colormap = 
-                SphereDetector::projectColormap(colormap, orthogonal_projection, true);
         
-        std::map<Color, cv::Matx22f> projected_color_covariance = {
-            {Color::RED, cv::Matx22f(0.0066, -0.0034, -0.0034, 0.0024)},
-            {Color::GREEN, cv::Matx22f(0.006, -0.0005, -0.0005, 0.001)},
-            {Color::BLUE, cv::Matx22f(0.0057, -0.0042, -0.0042, 0.0051)},
-            {Color::YELLOW, cv::Matx22f(0.0004, 0.0004, 0.0004, 0.0128)},
-            {Color::ORANGE, cv::Matx22f(0.0035, -0.0035, -0.0035, 0.0048)},
-        };
+        std::map<Color, Gaussian<float, 2>> projected_color_class_map;
+        for (const std::pair<Color, Gaussian<float, 3>>& color : color_class_map) {
+            projected_color_class_map[color.first] = Gaussian<float, 3>::transform(color.second, orthogonal_projection);
+        }
         
         rgb_image.forEach<cv::Vec3f>(
             [&](const cv::Vec3f& pixel, const int* position) -> void {
@@ -510,12 +574,12 @@ private:
                     
                     Color pixel_color = Color::OTHER;
                     float max_color_likelihood = -std::numeric_limits<float>::infinity();
-                    for (const std::pair<Color, cv::Vec2f>& color : projected_colormap) {
-                        const cv::Vec2f& color_vector = color.second;
+                    for (const std::pair<Color, Gaussian<float, 2>>& color : projected_color_class_map) {
+                        const Gaussian<float, 2>& color_class = color.second;
                         
 //                        float color_likelihood = 0.5*(cv::normalize<float, 2>(pixel_vector).dot(color_vector) + 1);
 //                        float color_likelihood = SphereDetector::evaluateGaussianPDF(pixel_vector, color_vector, projected_color_covariance[color.first]);
-                        float color_likelihood = SphereDetector::evaluateGaussianLogLikelihood(pixel_vector, color_vector, projected_color_covariance[color.first]);
+                        float color_likelihood = color_class.evaluateLogLikelihood(pixel_vector);
 //                        
                         
                         if (color_likelihood > max_color_likelihood) {

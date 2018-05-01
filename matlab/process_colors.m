@@ -1,7 +1,7 @@
 clear;
 close all;
 
-[I, ~, alpha] = imread('red_real.png');
+[I, ~, alpha] = imread('orange_real.png');
 [rows, cols, channels] = size(I);
 subplot(1, 2, 1), imshow(I);
 
@@ -18,7 +18,7 @@ ortho_projection = [
 proj_pixels = (ortho_projection*pixels')';
 radius = sqrt(sum(proj_pixels.^2, 2));
 angles = atan2(proj_pixels(:, 2), proj_pixels(:, 1));
-colorful_threshold = .25;
+colorful_threshold = .1;
 
 Icolorful = pixels;
 Icolorful(radius < colorful_threshold, :) = 0;

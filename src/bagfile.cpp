@@ -20,11 +20,11 @@ int main(int argc, char** argv) {
     bagfile_reader.setCallback(callback);
 
     std::vector<std::string> topics;
-//    topics.push_back(std::string("/camera/rgb/image_color"));
-    topics.push_back(std::string("/camera/rgb/image_raw"));
+    topics.push_back(std::string("/camera/rgb/image_color"));
+//    topics.push_back(std::string("/camera/rgb/image_raw"));
     topics.push_back(std::string("/camera/rgb/camera_info"));
-    topics.push_back(std::string("/camera/depth_registered/image_raw"));
-//    topics.push_back(std::string("/camera/depth/image"));
+//    topics.push_back(std::string("/camera/depth_registered/image_raw"));
+    topics.push_back(std::string("/camera/depth/image"));
     bagfile_reader.setTopics(topics);
     
     while(bagfile_reader.readNextRGBDMessage()) {
