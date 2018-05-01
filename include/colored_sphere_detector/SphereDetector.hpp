@@ -110,8 +110,6 @@ public:
             return inv_covariance;
         }
         
-        
-
     };
     
     struct Configuration {
@@ -125,10 +123,10 @@ public:
         // Color classification parameters
         
         std::map<Color, Gaussian<float, 3>> color_class_map = {
-            {Color::RED, Gaussian<float, 3>(cv::Vec3f(0.6636, 0.1600, 0.2000), cv::Matx33f(
-                    0.0155, 0.0062, 0.0073, 
-                    0.0062, 0.0064, 0.0067, 
-                    0.0073, 0.0067, 0.0078))},
+            {Color::RED, Gaussian<float, 3>(cv::Vec3f(0.6762, 0.1513, 0.1850), cv::Matx33f(
+                    0.0134, 0.0052, 0.0064, 
+                    0.0052, 0.0038, 0.0042, 
+                    0.0064, 0.0042, 0.0054))},
             {Color::GREEN, Gaussian<float, 3>(cv::Vec3f(0.1387, 0.4116, 0.2718), cv::Matx33f(
                     0.0066, 0.0080, 0.0080, 
                     0.0080, 0.0193, 0.0152, 
@@ -141,22 +139,22 @@ public:
                     0.0154, 0.0174, 0.0073,
                     0.0174, 0.0202, 0.0088,
                     0.0073, 0.0088, 0.0149))},
-            {Color::ORANGE, Gaussian<float, 3>(cv::Vec3f(0.7900, 0.2218, .1046), cv::Matx33f(
-                    0.0140, 0.0070, 0.0016,
-                    0.0070, 0.0069, 0.0041,
-                    0.0016, 0.0041, 0.0041))},
+            {Color::ORANGE, Gaussian<float, 3>(cv::Vec3f(0.8017, 0.2349, .1267), cv::Matx33f(
+                    0.0133, 0.0070, 0.0019,
+                    0.0070, 0.0070, 0.0042,
+                    0.0019, 0.0042, 0.0041))},
         };
         
-        float colorful_threshold = .08; // minimum magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
-        float color_likelihood_threshold = -70; // minimum likelihood value for pixel to not be classified as other
+        float colorful_threshold = .09; // minimum magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
+        float color_likelihood_threshold = -8; // minimum likelihood value for pixel to not be classified as other
         
         // Circle detection parameters
         
-        float bounding_box_ratio_threshold = .9; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
+        float bounding_box_ratio_threshold = .92; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
         float min_circle_radius = 6; // minimum radius of candidate circle in pixels
         float max_circle_radius = 50; // maximum radius of candidate circle in pixels
         float circular_fill_ratio_threshold = .8; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
-        float component_area_ratio_threshold = .94; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
+        float component_area_ratio_threshold = .9; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
         
         // Sphere fitting parameters
         
@@ -375,7 +373,7 @@ public:
             cv::cvtColor(output, output, CV_RGB2BGR);
             cv::imshow("Color Classification & Components", SphereDetector::imagesc(class_and_components));
             cv::imshow("Detections", output);
-            cv::waitKey(1);
+            cv::waitKey(0);
         }
         
         return detections;
