@@ -9,14 +9,14 @@
 #include <rgbd_drivers_uncc/rgbd_driver.hpp>
 
 int main(int argc, char** argv) {
-    SphereDetector detector;
+    ColoredSphereDetector detector;
     detector.config.visualize = true;
     
     std::cout << "Opening bag file: " << argv[1] << " for reading...\n";
     RGBD_BagFile_Driver bagfile_reader(argv[1]);
     
     boost::function<void (cv::Mat&, cv::Mat&, cv::Mat&, cv::Mat&)> callback(
-            boost::bind(&SphereDetector::rgbd_callback, &detector, _1, _2, _4));    
+            boost::bind(&ColoredSphereDetector::rgbd_callback, &detector, _1, _2, _4));    
     bagfile_reader.setCallback(callback);
 
     std::vector<std::string> topics;
