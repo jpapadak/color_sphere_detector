@@ -31,17 +31,17 @@ enum class Color {
     OTHER, RED, GREEN, BLUE, YELLOW, ORANGE
 };
 
-template <typename NumericType, int size>
+template <typename scalar_t, int size>
 class Gaussian {
 
-    cv::Vec<NumericType, size> mean;
-    cv::Matx<NumericType, size, size> covariance;
-    cv::Matx<NumericType, size, size> inv_covariance;
-    NumericType det_covariance;
-    NumericType log_det_covariance;
-    NumericType normalization_factor;
-    static constexpr NumericType pi = std::acos(-1);
-    static constexpr NumericType nlog2pi = size*std::log(2*pi);
+    cv::Vec<scalar_t, size> mean;
+    cv::Matx<scalar_t, size, size> covariance;
+    cv::Matx<scalar_t, size, size> inv_covariance;
+    scalar_t det_covariance;
+    scalar_t log_det_covariance;
+    scalar_t normalization_factor;
+    static constexpr scalar_t pi = std::acos(-1);
+    static constexpr scalar_t nlog2pi = size*std::log(2*pi);
 
     void precomputeTerms() {
         this->inv_covariance = covariance.inv();
@@ -54,19 +54,19 @@ public:
     Gaussian() {
     }
 
-    Gaussian(const cv::Vec<NumericType, size>& mean, const cv::Matx<NumericType, size, size>& covariance) {
+    Gaussian(const cv::Vec<scalar_t, size>& mean, const cv::Matx<scalar_t, size, size>& covariance) {
         this->mean = mean;
         this->covariance = covariance;
         this->precomputeTerms();
     }
 
-    NumericType evaluate(const cv::Vec<NumericType, size>& x) const {
-        cv::Vec<NumericType, size> x_minus_mu = x - mean;
+    scalar_t evaluate(const cv::Vec<scalar_t, size>& x) const {
+        cv::Vec<scalar_t, size> x_minus_mu = x - mean;
         return normalization_factor*std::exp(-0.5*(x_minus_mu.t()*inv_covariance*x_minus_mu)[0]);
     }
 
-    NumericType evaluateLogLikelihood(const cv::Vec<NumericType, size>& x) const {
-        cv::Vec<NumericType, size> x_minus_mu = x - mean;
+    scalar_t evaluateLogLikelihood(const cv::Vec<scalar_t, size>& x) const {
+        cv::Vec<scalar_t, size> x_minus_mu = x - mean;
         return -0.5*(nlog2pi + log_det_covariance + (x_minus_mu.t()*inv_covariance*x_minus_mu)[0]);
     }
 
@@ -76,28 +76,28 @@ public:
     }
 
     template <int newsize>
-    void transform(const cv::Matx<NumericType, newsize, size>& transformation_matrix) {
+    void transform(const cv::Matx<scalar_t, newsize, size>& transformation_matrix) {
         *this = Gaussian::transform(*this, transformation_matrix);
     }
 
-    void setMean(const cv::Vec<NumericType, size>& mean) {
+    void setMean(const cv::Vec<scalar_t, size>& mean) {
         this->mean = mean;
     }
 
-    const cv::Vec<NumericType, size>& getMean() const {
+    const cv::Vec<scalar_t, size>& getMean() const {
         return mean;
     }
 
-    void setCovariance(const cv::Matx<NumericType, size, size>& covariance) {
+    void setCovariance(const cv::Matx<scalar_t, size, size>& covariance) {
         this->covariance = covariance;
         this->precomputeTerms();
     }
 
-    const cv::Matx<NumericType, size, size>& getCovariance() const {
+    const cv::Matx<scalar_t, size, size>& getCovariance() const {
         return covariance;
     }
 
-    const cv::Matx<NumericType, size, size>& getInverseCovariance() const {
+    const cv::Matx<scalar_t, size, size>& getInverseCovariance() const {
         return inv_covariance;
     }
 
@@ -703,23 +703,23 @@ private:
         return std::make_tuple(mean, cov, zero_centered_points);
     }
     
-    template <typename NumericType, int size>
-    static cv::Vec<NumericType, size> vectorProjection(const cv::Vec<NumericType, size>& a, const cv::Vec<NumericType, size>& b) {
+    template <typename scalar_t, int size>
+    static cv::Vec<scalar_t, size> vectorProjection(const cv::Vec<scalar_t, size>& a, const cv::Vec<scalar_t, size>& b) {
         return a.dot(b)*cv::normalize(b);
     }
     
-    template <typename NumericType, int size>
-    static cv::Vec<NumericType, size> vectorRejection(const cv::Vec<NumericType, size>& a, const cv::Vec<NumericType, size>& b) {
+    template <typename scalar_t, int size>
+    static cv::Vec<scalar_t, size> vectorRejection(const cv::Vec<scalar_t, size>& a, const cv::Vec<scalar_t, size>& b) {
         return a - vectorProjection(a, b);
     }
     
-    template <typename NumericType, int rows, int cols>
-    cv::Matx<NumericType, rows, cols> normalizeColumns(const cv::Matx<NumericType, rows, cols>& input_matrix) const {
-        cv::Matx<NumericType, rows, cols> normalized;
+    template <typename scalar_t, int rows, int cols>
+    cv::Matx<scalar_t, rows, cols> normalizeColumns(const cv::Matx<scalar_t, rows, cols>& input_matrix) const {
+        cv::Matx<scalar_t, rows, cols> normalized;
         
         for (int col = 0; col < cols; ++col) {
             // would love a simple Matx -> Vec conversion
-            cv::Matx<NumericType, rows, 1> output_col = (1.0/cv::norm(input_matrix.col(col)))*input_matrix.col(col);
+            cv::Matx<scalar_t, rows, 1> output_col = (1.0/cv::norm(input_matrix.col(col)))*input_matrix.col(col);
             for (int row = 0; row < rows; ++row) {
                 normalized(row, col) = output_col(row);
             }
