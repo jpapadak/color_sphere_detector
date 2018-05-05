@@ -209,8 +209,8 @@ class CircleDetector {
 public:
     
     float bounding_box_ratio_threshold = .92; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
-    float min_circle_radius = 6; // minimum radius of candidate circle in pixels
-    float max_circle_radius = 50; // maximum radius of candidate circle in pixels
+    float min_radius = 6; // minimum radius of candidate circle in pixels
+    float max_radius = 50; // maximum radius of candidate circle in pixels
     float circular_fill_ratio_threshold = .8; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
     float component_area_ratio_threshold = .9; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
     
@@ -224,7 +224,7 @@ public:
     std::vector<CircleDetection> detectCircles(const cv::Mat1b& binary_image) {
         return std::move(this->detectCircles(binary_image, 
                     bounding_box_ratio_threshold, 
-                    min_circle_radius, max_circle_radius, 
+                    min_radius, max_radius, 
                     circular_fill_ratio_threshold, 
                     component_area_ratio_threshold)
                 );
@@ -311,12 +311,10 @@ public:
 class SphereDetector {
 public:
     
-    cv::Point2f focal_length = cv::Point2f(500, 500);
-    cv::Point2f image_center = cv::Point2f(320, 240);
     size_t min_points_for_fitting = 10;
     float ransac_model_distance_threshold = .008; // distance from the spherical model within which point is considered an inlier
-    float min_sphere_radius = .02; // meters
-    float max_sphere_radius = .045; // meters
+    float min_radius = .02; // meters
+    float max_radius = .045; // meters
     float inlier_percentage_threshold = .6; // percentage of data within distance threshold of the refined model, used to accept or reject detection
     
     struct SphereDetection {
@@ -328,8 +326,8 @@ public:
     };
     
     SphereDetection fitSphericalModelRANSAC(pcl::PointCloud<pcl::PointXYZ>::Ptr points) {
-        return this->fitSphericalModelRANSAC(points, min_sphere_radius, 
-                max_sphere_radius, ransac_model_distance_threshold);
+        return this->fitSphericalModelRANSAC(points, min_radius, 
+                max_radius, ransac_model_distance_threshold);
     }
     
     static SphereDetection fitSphericalModelRANSAC(pcl::PointCloud<pcl::PointXYZ>::Ptr points, 
@@ -365,23 +363,41 @@ public:
 };
 
 class ColoredSphereDetector {
+public:
+        
     PixelColorClassifier pixel_color_classifier;
     CircleDetector circle_detector;
     SphereDetector sphere_detector;
     
-public:
+    bool visualize = false;
+
+    // Margin of pixels ignored on input image
+    size_t margin_x = 0; 
+    size_t margin_y = 0;
     
-    struct Configuration {
+    // Camera parameters needed for point reconstruction
+    cv::Point2f focal_length = cv::Point2f(500, 500);
+    cv::Point2f image_center = cv::Point2f(320, 240);
+    
+    struct ColoredCircleDetection : CircleDetector::CircleDetection {
+        Color color;
+        ColoredCircleDetection() = default;
+        ColoredCircleDetection(const CircleDetector::CircleDetection& circle, Color color) : 
+            CircleDetector::CircleDetection(circle), color(color) {}
         
-        bool visualize = false;
+    };
+    
+    struct ColoredSphereDetection : SphereDetector::SphereDetection {
+        Color color;
+        ColoredSphereDetection() = default;
+        ColoredSphereDetection(const SphereDetector::SphereDetection& sphere, Color color) : 
+            SphereDetector::SphereDetection(sphere), color(color) {}
         
-        // Margin of pixels ignored on input image
-        size_t margin_x = 0; 
-        size_t margin_y = 0;
+    };
+    
+    ColoredSphereDetector() {    
         
-        // Color classification parameters
-        
-        std::map<Color, Gaussian<float, 3>> color_class_map = {
+        pixel_color_classifier.color_class_map =  std::map<Color, Gaussian<float, 3>>{
             {Color::RED, Gaussian<float, 3>(cv::Vec3f(0.6762, 0.1513, 0.1850), cv::Matx33f(
                     0.0134, 0.0052, 0.0064, 
                     0.0052, 0.0038, 0.0042, 
@@ -404,63 +420,21 @@ public:
                     0.0019, 0.0042, 0.0041))},
         };
         
-        float colorful_threshold = .09; // minimum magnitude of the vector rejection of the pixel color vector onto the intensity vector (1, 1, 1)
-        float color_likelihood_threshold = -8; // minimum likelihood value for pixel to not be classified as other
+        pixel_color_classifier.colorful_threshold = .09;
+        pixel_color_classifier.color_likelihood_threshold = -8;
+
+        circle_detector.bounding_box_ratio_threshold = .92;
+        circle_detector.min_radius = 6; // pixels
+        circle_detector.max_radius = 50; // pixels
+        circle_detector.circular_fill_ratio_threshold = .8; 
+        circle_detector.component_area_ratio_threshold = .9;
+
+        sphere_detector.min_points_for_fitting = 10;
+        sphere_detector.ransac_model_distance_threshold = .008;
+        sphere_detector.min_radius = .02; // meters
+        sphere_detector.max_radius = .045; // meters
+        sphere_detector.inlier_percentage_threshold = .6;
         
-        // Circle detection parameters
-        
-        float bounding_box_ratio_threshold = .92; // ratio between the shortest side to the longest side of the bounding box, range 0 to 1
-        float min_circle_radius = 6; // minimum radius of candidate circle in pixels
-        float max_circle_radius = 50; // maximum radius of candidate circle in pixels
-        float circular_fill_ratio_threshold = .8; // ratio of number of pixels within candidate circle and expected circle area, range 0 to 1
-        float component_area_ratio_threshold = .9; // ratio of number of pixels within candidate circle and total component area, range 0 to 1
-        
-        // Sphere fitting parameters
-        
-        cv::Point2f focal_length = cv::Point2f(500, 500);
-        cv::Point2f image_center = cv::Point2f(320, 240);
-        size_t min_points_for_fitting = 10;
-        float ransac_model_distance_threshold = .008; // distance from the spherical model within which point is considered an inlier
-        float min_sphere_radius = .02; // meters
-        float max_sphere_radius = .045; // meters
-        float inlier_percentage_threshold = .6; // percentage of data within distance threshold of the refined model, used to accept or reject detection
-        
-    } config;
-    
-    struct ColoredCircleDetection : CircleDetector::CircleDetection {
-        Color color;
-        ColoredCircleDetection() = default;
-        explicit ColoredCircleDetection(const CircleDetector::CircleDetection& circle, Color color) : 
-            CircleDetector::CircleDetection(circle), color(color) {}
-        
-    };
-    
-    struct ColoredSphereDetection : SphereDetector::SphereDetection {
-        Color color;
-        ColoredSphereDetection() = default;
-        explicit ColoredSphereDetection(const SphereDetector::SphereDetection& sphere, Color color) : 
-            SphereDetector::SphereDetection(sphere), color(color) {}
-        
-    };
-    
-    ColoredSphereDetector() {    
-        pixel_color_classifier.color_class_map = config.color_class_map;
-        pixel_color_classifier.colorful_threshold = config.colorful_threshold;
-        pixel_color_classifier.color_likelihood_threshold = config.color_likelihood_threshold;
-        
-        circle_detector.bounding_box_ratio_threshold = config.bounding_box_ratio_threshold;
-        circle_detector.min_circle_radius = config.min_circle_radius;
-        circle_detector.max_circle_radius = config.max_circle_radius;
-        circle_detector.component_area_ratio_threshold = config.component_area_ratio_threshold;
-        circle_detector.circular_fill_ratio_threshold = config.circular_fill_ratio_threshold;
-        
-        sphere_detector.focal_length = config.focal_length;
-        sphere_detector.image_center = config.image_center;
-        sphere_detector.inlier_percentage_threshold = config.inlier_percentage_threshold;
-        sphere_detector.min_sphere_radius = config.min_sphere_radius;
-        sphere_detector.max_sphere_radius = config.max_sphere_radius;
-        sphere_detector.min_points_for_fitting = config.min_points_for_fitting;
-        sphere_detector.ransac_model_distance_threshold = config.ransac_model_distance_threshold;
     }
     
     virtual ~ColoredSphereDetector() {
@@ -472,27 +446,49 @@ public:
         cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
         cv::Point2f focal_length(camera_matrix(0, 0), camera_matrix(1, 1));
         cv::Point2f image_center(camera_matrix(0, 2), camera_matrix(1, 2));
-        config.focal_length = focal_length;
-        config.image_center = image_center;
+        this->focal_length = focal_length;
+        this->image_center = image_center;
         
         return this->detect(rgb_input, depth_input);
         
     }
     
     std::vector<ColoredSphereDetection> detect(const cv::Mat& rgb_input, const cv::Mat& depth_input) {
+        
         // Assumes rgb_input is has channels RGB in order
         assert(rgb_input.channels() == 3);
         
         // Trim down input image by margin, median blur, convert to float if needed
-        cv::Rect roi(config.margin_x, config.margin_y, rgb_input.cols - config.margin_x, rgb_input.rows - config.margin_y);
+        cv::Rect roi(margin_x, margin_y, rgb_input.cols - margin_x, rgb_input.rows - margin_y);
         cv::Mat rgb_image = rgb_input(roi).clone();
         cv::medianBlur(rgb_image, rgb_image, 5);
         if (rgb_image.depth() != CV_32F) {
             rgb_image.convertTo(rgb_image, CV_32F);
         }
         
-        cv::Mat color_classified_image = 
-                pixel_color_classifier.classifyPixelColors(rgb_image,  config.color_class_map, config.colorful_threshold, config.color_likelihood_threshold);
+        std::vector<ColoredCircleDetection> colored_circles = detectAppearance(rgb_image);
+        
+         if (visualize) {
+             
+            cv::Mat output = rgb_input.clone();
+            if (output.type() != CV_8UC3) {
+                output.convertTo(output, CV_8UC3);
+            }
+            this->visualizeAppearanceDetections(colored_circles, output);
+            
+        }
+        
+        std::vector<ColoredSphereDetection> colored_spheres = detectGeometry(colored_circles, depth_input);
+        
+        colored_sphere_detections = colored_spheres;
+        
+        return colored_spheres;
+        
+    }
+    
+    std::vector<ColoredCircleDetection> detectAppearance(const cv::Mat& rgb_image) {
+        
+        cv::Mat color_classified_image = pixel_color_classifier.classifyPixelColors(rgb_image);
         
 //        cv::Mat class_and_components;
 //        if (config.visualize) {
@@ -500,16 +496,16 @@ public:
 //        }
         
         std::vector<ColoredCircleDetection> colored_circles;
-        for (const std::pair<Color, Gaussian<float, 3>>& entry : config.color_class_map) {
+        for (const std::pair<Color, Gaussian<float, 3>>& entry : pixel_color_classifier.color_class_map) {
             // For each color class, compute color mask and run connected components on mask
             
             Color color = entry.first;
             cv::Mat color_mask = color_classified_image == toInteger(color);
-            std::vector<CircleDetector::CircleDetection> circles = circle_detector.detectCircles(
-                    color_mask, config.bounding_box_ratio_threshold, config.min_circle_radius, 
-                    config.max_circle_radius, config.circular_fill_ratio_threshold, config.component_area_ratio_threshold);
+            std::vector<CircleDetector::CircleDetection> circles = circle_detector.detectCircles(color_mask);
             
-            for (const CircleDetector::CircleDetection& circle : circles) {
+            for (CircleDetector::CircleDetection& circle : circles) {
+                circle.x = circle.x + margin_x;
+                circle.y = circle.y + margin_y;
                 colored_circles.emplace_back(circle, color);
             }
             
@@ -527,41 +523,24 @@ public:
             
         }
         
-         if (config.visualize) {
-            
-            cv::Mat output = rgb_input.clone();
-            if (output.type() != CV_8UC3) {
-                output.convertTo(output, CV_8UC3);
-            }
-            
-            for (const ColoredCircleDetection& detection : colored_circles) {
-                cv::Vec3f colorvec = 255*config.color_class_map.at(detection.color).getMean();
-                cv::circle(output, cv::Point2f(detection.x, detection.y), detection.radius, 
-                        cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
-                cv::putText(output, toString(detection.color) + ", " + std::to_string(detection.radius), 
-                        cv::Point2i(detection.x - detection.radius, detection.y - detection.radius - 3), 
-                        cv::FONT_HERSHEY_PLAIN, 0.6, cv::Scalar(colorvec[0], colorvec[1], colorvec[2]));
-            }
-            
-            cv::cvtColor(output, output, CV_RGB2BGR);
-//            cv::imshow("Color Classification & Components", SphereDetector::imagesc(class_and_components));
-            cv::imshow("Detections", output);
-            cv::waitKey(1);
-        }
+        return colored_circles;
+        
+    }
+    
+    std::vector<ColoredSphereDetection> detectGeometry(std::vector<ColoredCircleDetection> colored_circles, const cv::Mat& depth_image) {
         
         std::vector<ColoredSphereDetection> colored_spheres;
         colored_spheres.reserve(colored_circles.size());
         
         for (const ColoredCircleDetection& colored_circle : colored_circles) {
             pcl::PointCloud<pcl::PointXYZ>::Ptr points = 
-                    this->reprojectToCloud(colored_circle.locations, depth_input, config.focal_length, config.image_center);
+                    this->reprojectToCloud(colored_circle.locations, depth_image, focal_length, image_center);
             
-            if (points->size() > config.min_points_for_fitting) {
+            if (points->size() > sphere_detector.min_points_for_fitting) {
                 
-                SphereDetector::SphereDetection sphere = sphere_detector.fitSphericalModelRANSAC(
-                        points, config.min_sphere_radius, config.max_sphere_radius, config.ransac_model_distance_threshold);
+                SphereDetector::SphereDetection sphere = sphere_detector.fitSphericalModelRANSAC(points);
                 
-                if (sphere.confidence > config.inlier_percentage_threshold) {
+                if (sphere.confidence > sphere_detector.inlier_percentage_threshold) {
                     colored_spheres.emplace_back(sphere, colored_circle.color);
                 }
                 
@@ -569,11 +548,29 @@ public:
             
         }
         
-        colored_sphere_detections = colored_spheres;
-        
         return colored_spheres;
         
     }
+    
+    void visualizeAppearanceDetections(const std::vector<ColoredCircleDetection>& detections, const cv::Mat& rgb_image) {
+        
+        for (const ColoredCircleDetection& detection : detections) {
+            cv::Vec3f colorvec = 255*pixel_color_classifier.color_class_map.at(detection.color).getMean();
+            cv::circle(rgb_image, cv::Point2f(detection.x, detection.y), detection.radius, 
+                    cv::Scalar(colorvec[0], colorvec[1], colorvec[2]), 2, 1);
+            cv::putText(rgb_image, toString(detection.color) + ", " + std::to_string(detection.radius), 
+                    cv::Point2i(detection.x - detection.radius, detection.y - detection.radius - 3), 
+                    cv::FONT_HERSHEY_PLAIN, 0.6, cv::Scalar(colorvec[0], colorvec[1], colorvec[2]));
+        }
+
+        cv::cvtColor(rgb_image, rgb_image, CV_RGB2BGR);
+//            cv::imshow("Color Classification & Components", SphereDetector::imagesc(class_and_components));
+        cv::imshow("Detections", rgb_image);
+        cv::waitKey(1);
+        
+    }
+    
+    
     
     static std::vector<cv::Point3f> reproject(const std::vector<cv::Point2i>& pixel_locations, 
             const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {
@@ -655,8 +652,6 @@ public:
     }
     
 private:
-    
-    static constexpr double pi = std::acos(-1.0);
     
     std::vector<ColoredSphereDetection> colored_sphere_detections;
     
