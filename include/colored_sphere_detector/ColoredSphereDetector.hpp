@@ -312,7 +312,7 @@ class SphereDetector {
 public:
     
     size_t min_points_for_fitting = 10;
-    float ransac_model_distance_threshold = .008; // distance from the spherical model within which point is considered an inlier
+    float ransac_model_distance_threshold = .01; // distance from the spherical model within which point is considered an inlier
     float min_radius = .02; // meters
     float max_radius = .045; // meters
     float inlier_percentage_threshold = .6; // percentage of data within distance threshold of the refined model, used to accept or reject detection
@@ -342,13 +342,18 @@ public:
         ransac.setDistanceThreshold(ransac_model_distance_threshold);
 //        ransac.setMaxIterations(10);
         ransac.computeModel();
+        
+        std::vector<int> inliers;
+        ransac.getInliers(inliers);
+        
         Eigen::VectorXf coeffs;
         ransac.getModelCoefficients(coeffs);
         
         // Percentage of points within distance threshold of model
-        float inlier_ratio = ransac.inliers_.size()/static_cast<float>(points->size());
+        float inlier_ratio = inliers.size()/static_cast<float>(points->size());
+        std::cout << inliers.size() << ", " << static_cast<float>(points->size()) << "\n";
         
-//        std::cout << "Sphere coeffs: " << coeffs.transpose() << ", confidence: " << inlier_ratio << "\n";
+        std::cout << "Sphere coeffs: " << coeffs.transpose() << ", confidence: " << inlier_ratio << "\n";
         
         SphereDetection sphere;
         sphere.x = coeffs[0];
@@ -376,7 +381,7 @@ public:
     size_t margin_y = 0;
     
     // Camera parameters needed for point reconstruction
-    cv::Point2f focal_length = cv::Point2f(500, 500);
+    cv::Point2f focal_length = cv::Point2f(570.34, 570.34);
     cv::Point2f image_center = cv::Point2f(320, 240);
     
     struct ColoredCircleDetection : CircleDetector::CircleDetection {
@@ -430,10 +435,10 @@ public:
         circle_detector.component_area_ratio_threshold = .9;
 
         sphere_detector.min_points_for_fitting = 10;
-        sphere_detector.ransac_model_distance_threshold = .008;
+        sphere_detector.ransac_model_distance_threshold = .01;
         sphere_detector.min_radius = .02; // meters
         sphere_detector.max_radius = .045; // meters
-        sphere_detector.inlier_percentage_threshold = .6;
+        sphere_detector.inlier_percentage_threshold = .5;
         
     }
     
@@ -444,10 +449,7 @@ public:
         
         cv::Mat rgb_input;
         cv::cvtColor(color_input, rgb_input, CV_BGR2RGB);
-        cv::Point2f focal_length(camera_matrix(0, 0), camera_matrix(1, 1));
-        cv::Point2f image_center(camera_matrix(0, 2), camera_matrix(1, 2));
-        this->focal_length = focal_length;
-        this->image_center = image_center;
+        this->setCameraParametersFromMatrix(camera_matrix);
         
         return this->detect(rgb_input, depth_input);
         
@@ -533,6 +535,7 @@ public:
         colored_spheres.reserve(colored_circles.size());
         
         for (const ColoredCircleDetection& colored_circle : colored_circles) {
+            
             pcl::PointCloud<pcl::PointXYZ>::Ptr points = 
                     this->reprojectToCloud(colored_circle.locations, depth_image, focal_length, image_center);
             
@@ -552,6 +555,13 @@ public:
         
     }
     
+    void setCameraParametersFromMatrix(const cv::Matx33f& camera_matrix) {
+        cv::Point2f focal_length(camera_matrix(0, 0), camera_matrix(1, 1));
+        cv::Point2f image_center(camera_matrix(0, 2), camera_matrix(1, 2));
+        this->focal_length = focal_length;
+        this->image_center = image_center;
+    }
+    
     void visualizeAppearanceDetections(const std::vector<ColoredCircleDetection>& detections, const cv::Mat& rgb_image) {
         
         for (const ColoredCircleDetection& detection : detections) {
@@ -569,8 +579,6 @@ public:
         cv::waitKey(1);
         
     }
-    
-    
     
     static std::vector<cv::Point3f> reproject(const std::vector<cv::Point2i>& pixel_locations, 
             const cv::Mat& depth_image, const cv::Point2f& focal_length, const cv::Point2f& center) {

@@ -21,9 +21,9 @@ int main(int argc, char** argv) {
 
     std::vector<std::string> topics;
 //    topics.push_back(std::string("/camera/rgb/image_color"));
-    topics.push_back(std::string("/camera/rgb/image_raw"));
-    topics.push_back(std::string("/camera/rgb/camera_info"));
-    topics.push_back(std::string("/camera/depth_registered/image_raw"));
+    topics.push_back(std::string("camera/rgb/input_image"));
+    topics.push_back(std::string("camera/rgb/camera_info"));
+    topics.push_back(std::string("camera/depth_registered/input_image"));
 //    topics.push_back(std::string("/camera/depth/image"));
     bagfile_reader.setTopics(topics);
     
