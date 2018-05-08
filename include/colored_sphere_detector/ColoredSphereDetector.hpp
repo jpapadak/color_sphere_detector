@@ -312,6 +312,7 @@ class SphereDetector {
 public:
     
     size_t min_points_for_fitting = 10;
+    size_t iterations = 1000;
     float ransac_model_distance_threshold = .01; // distance from the spherical model within which point is considered an inlier
     float min_radius = .02; // meters
     float max_radius = .045; // meters
@@ -325,13 +326,32 @@ public:
         float confidence;
     };
     
+    std::pair<bool, SphereDetection> detectSphere(pcl::PointCloud<pcl::PointXYZ>::Ptr points) {
+        
+        bool sphere_detected = false;
+        SphereDetector::SphereDetection sphere;
+        
+        if (points->size() > min_points_for_fitting) {
+                
+            sphere = this->fitSphericalModelRANSAC(points);
+
+            if (sphere.confidence > inlier_percentage_threshold) {
+                sphere_detected = true;
+            }
+            
+        }
+        
+        return std::make_pair(sphere_detected, sphere);
+        
+    }
+    
     SphereDetection fitSphericalModelRANSAC(pcl::PointCloud<pcl::PointXYZ>::Ptr points) {
         return this->fitSphericalModelRANSAC(points, min_radius, 
-                max_radius, ransac_model_distance_threshold);
+                max_radius, ransac_model_distance_threshold, iterations);
     }
     
     static SphereDetection fitSphericalModelRANSAC(pcl::PointCloud<pcl::PointXYZ>::Ptr points, 
-            float min_radius, float max_radius, float ransac_model_distance_threshold) {
+            float min_radius, float max_radius, float ransac_model_distance_threshold, size_t iterations) {
         
         pcl::SampleConsensusModelSphere<pcl::PointXYZ>::Ptr sphere_model = 
                 boost::make_shared<pcl::SampleConsensusModelSphere<pcl::PointXYZ>>(points);
@@ -340,18 +360,16 @@ public:
         pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(sphere_model);
         
         ransac.setDistanceThreshold(ransac_model_distance_threshold);
-//        ransac.setMaxIterations(10);
-        ransac.computeModel();
         
-        std::vector<int> inliers;
-        ransac.getInliers(inliers);
+        ransac.setMaxIterations(iterations);
+        ransac.computeModel();
         
         Eigen::VectorXf coeffs;
         ransac.getModelCoefficients(coeffs);
+        int inliers = ransac.inliers_.size();
         
         // Percentage of points within distance threshold of model
-        float inlier_ratio = inliers.size()/static_cast<float>(points->size());
-        std::cout << inliers.size() << ", " << static_cast<float>(points->size()) << "\n";
+        float inlier_ratio = inliers/static_cast<float>(points->size());
         
         std::cout << "Sphere coeffs: " << coeffs.transpose() << ", confidence: " << inlier_ratio << "\n";
         
@@ -363,6 +381,7 @@ public:
         sphere.confidence = inlier_ratio;
         
         return sphere;
+        
     }
     
 };
@@ -438,7 +457,7 @@ public:
         sphere_detector.ransac_model_distance_threshold = .01;
         sphere_detector.min_radius = .02; // meters
         sphere_detector.max_radius = .045; // meters
-        sphere_detector.inlier_percentage_threshold = .5;
+        sphere_detector.inlier_percentage_threshold = .6;
         
     }
     
@@ -476,7 +495,7 @@ public:
             if (output.type() != CV_8UC3) {
                 output.convertTo(output, CV_8UC3);
             }
-            this->visualizeAppearanceDetections(colored_circles, output);
+            this->visualizeCircleDetections(colored_circles, output);
             
         }
         
@@ -492,11 +511,6 @@ public:
         
         cv::Mat color_classified_image = pixel_color_classifier.classifyPixelColors(rgb_image);
         
-//        cv::Mat class_and_components;
-//        if (config.visualize) {
-//            class_and_components = color_classified_image.clone();
-//        }
-        
         std::vector<ColoredCircleDetection> colored_circles;
         for (const std::pair<Color, Gaussian<float, 3>>& entry : pixel_color_classifier.color_class_map) {
             // For each color class, compute color mask and run connected components on mask
@@ -511,18 +525,10 @@ public:
                 colored_circles.emplace_back(circle, color);
             }
             
-//            if (visualize) {
-//                cv::rectangle(class_and_components, bb_roi, toInteger(color));
-//                cv::putText(class_and_components, 
-//                        "Fill: " + std::to_string(circular_fill_ratio).substr(0, 4), 
-//                        cv::Point(bb_x, bb_y - 2), cv::FONT_HERSHEY_PLAIN, 
-//                        0.6, toInteger(color));
-//                cv::putText(class_and_components, 
-//                        "Area: " + std::to_string(component_area_ratio).substr(0, 4), 
-//                        cv::Point(bb_x, bb_y + bb_height + 6), cv::FONT_HERSHEY_PLAIN, 
-//                        0.6, toInteger(color));
-//            }
-            
+        }
+        
+        if (visualize) {
+            cv::imshow("Color Classification", this->imagesc(color_classified_image));
         }
         
         return colored_circles;
@@ -539,14 +545,13 @@ public:
             pcl::PointCloud<pcl::PointXYZ>::Ptr points = 
                     this->reprojectToCloud(colored_circle.locations, depth_image, focal_length, image_center);
             
-            if (points->size() > sphere_detector.min_points_for_fitting) {
-                
-                SphereDetector::SphereDetection sphere = sphere_detector.fitSphericalModelRANSAC(points);
-                
-                if (sphere.confidence > sphere_detector.inlier_percentage_threshold) {
-                    colored_spheres.emplace_back(sphere, colored_circle.color);
-                }
-                
+            bool sphere_detected;
+            SphereDetector::SphereDetection sphere;
+            
+            std::tie(sphere_detected, sphere) = sphere_detector.detectSphere(points); // std::optional if C++17
+            
+            if (sphere_detected) {
+                colored_spheres.emplace_back(sphere, colored_circle.color);
             }
             
         }
@@ -562,7 +567,7 @@ public:
         this->image_center = image_center;
     }
     
-    void visualizeAppearanceDetections(const std::vector<ColoredCircleDetection>& detections, const cv::Mat& rgb_image) {
+    void visualizeCircleDetections(const std::vector<ColoredCircleDetection>& detections, const cv::Mat& rgb_image) {
         
         for (const ColoredCircleDetection& detection : detections) {
             cv::Vec3f colorvec = 255*pixel_color_classifier.color_class_map.at(detection.color).getMean();
@@ -574,7 +579,6 @@ public:
         }
 
         cv::cvtColor(rgb_image, rgb_image, CV_RGB2BGR);
-//            cv::imshow("Color Classification & Components", SphereDetector::imagesc(class_and_components));
         cv::imshow("Detections", rgb_image);
         cv::waitKey(1);
         
@@ -623,6 +627,8 @@ public:
             }
             
         }
+        
+        cloud->width = cloud->points.size();
         
         return cloud;
         
