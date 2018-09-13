@@ -280,18 +280,27 @@ private:
         
     }
     
-    static cv::Mat imagesc(const cv::Mat& input) {
+    static cv::Mat imagesc(const cv::Mat& input, float end_trim_percentage = 0) {
         double min;
         double max;
-        cv::minMaxIdx(input, &min, &max);
-        
+        if (end_trim_percentage > 0 and end_trim_percentage < 0.5) {
+            int n = input.rows*input.cols;
+            std::vector<float> input_values;
+            input.reshape(1, n).copyTo(input_values);
+            std::sort(input_values.begin(), input_values.end());
+            min = input_values[std::round(end_trim_percentage*n)];
+            max = input_values[std::round((1 - end_trim_percentage)*n)];
+        } else {
+            cv::minMaxIdx(input, &min, &max);
+        }
+
         cv::Mat scaled;
         float scale = 255.0/(max - min);
         input.convertTo(scaled, CV_8UC1, scale, -min*scale);
 
         cv::Mat false_color;
         cv::applyColorMap(scaled, false_color, cv::COLORMAP_JET);
-        
+
         return false_color;
     }
     
